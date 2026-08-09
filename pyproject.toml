@@ -20,6 +20,12 @@ dependencies = [
     "numpy>=1.26.0",
 ]
 
+[project.optional-dependencies]
+dev = [
+    "ruff",
+    "pytest",
+]
+
 [build-system]
 requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
@@ -27,3 +33,18 @@ build-backend = "setuptools.build_meta"
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["urjaa_core*"]
+
+[tool.ruff.lint]
+# This package was extracted verbatim (zero logic changes, URJ-repo-split-1.1/1.2)
+# from the urjaa-ornaments-platform monorepo. The monorepo itself has never been
+# gated by a ruff config (none exists there either) and running default-ruleset
+# ruff against it today already fails (193 errors on backend/app alone) — that
+# debt is pre-existing and unrelated to this migration. Rather than silently
+# widening scope to fix or hide it, this pins `select` back to ruff's classic
+# minimal default (pyflakes + pycodestyle errors) so CI catches real correctness
+# issues (undefined names, syntax errors) without blocking on inherited style
+# debt from newer, stricter rule categories (pyupgrade, bugbear, flake8-simplify,
+# etc.) that were never part of this codebase's contract. `ignore` below drops
+# the handful of classic-default findings that are pure style, not bugs.
+select = ["E4", "E7", "E9", "F"]
+ignore = ["F401", "E402", "E702", "F841"]
