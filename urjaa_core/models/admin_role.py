@@ -5,6 +5,7 @@ from urjaa_core.models.base import Base
 
 class AdminRole(Base):
     __tablename__ = "roles"
+    __table_args__ = {"schema": "admin"}
 
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String(64), nullable=False, unique=True, index=True)
