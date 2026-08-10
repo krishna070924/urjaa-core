@@ -24,7 +24,7 @@ class NotificationCampaign(Base):
 
     id               = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     store_id         = Column(UUID(as_uuid=True), ForeignKey("stores.id", ondelete="CASCADE"), nullable=True, index=True)
-    created_by       = Column(UUID(as_uuid=True), ForeignKey("admin_users.id", ondelete="SET NULL"), nullable=True)
+    created_by       = Column(Integer, ForeignKey("admin_users.id", ondelete="SET NULL"), nullable=True)
     name             = Column(Text, nullable=False)
     type             = Column(Text, nullable=False)
     trigger_type     = Column(Text, nullable=False)

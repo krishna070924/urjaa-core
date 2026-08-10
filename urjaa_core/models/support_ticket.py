@@ -1,6 +1,6 @@
 import uuid
 
-from sqlalchemy import Boolean, CheckConstraint, Column, ForeignKey, TIMESTAMP, Text
+from sqlalchemy import Boolean, CheckConstraint, Column, ForeignKey, Integer, TIMESTAMP, Text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -37,7 +37,7 @@ class SupportTicket(Base):
     category              = Column(Text, nullable=False, default="general", server_default="general")
     priority              = Column(Text, nullable=False, default="normal", server_default="normal")
     status                = Column(Text, nullable=False, default="open", server_default="open")
-    assigned_to           = Column(UUID(as_uuid=True), ForeignKey("admin_users.id", ondelete="SET NULL"), nullable=True, index=True)
+    assigned_to           = Column(Integer, ForeignKey("admin_users.id", ondelete="SET NULL"), nullable=True, index=True)
     resolved_at           = Column(TIMESTAMP(timezone=True), nullable=True)
     created_at            = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
     updated_at            = Column(TIMESTAMP(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
@@ -52,7 +52,7 @@ class TicketReply(Base):
 
     id          = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     ticket_id   = Column(UUID(as_uuid=True), ForeignKey("support_tickets.id", ondelete="CASCADE"), nullable=False, index=True)
-    admin_id    = Column(UUID(as_uuid=True), ForeignKey("admin_users.id", ondelete="SET NULL"), nullable=True)
+    admin_id    = Column(Integer, ForeignKey("admin_users.id", ondelete="SET NULL"), nullable=True)
     body        = Column(Text, nullable=False)
     is_internal = Column(Boolean, nullable=False, default=False, server_default="false")
     created_at  = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
