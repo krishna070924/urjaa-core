@@ -10,15 +10,13 @@ import time
 from typing import Any
 
 from fastapi import Depends, Header, HTTPException, Request
-from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from urjaa_core.core.database import engine, get_db
+from urjaa_core.core.database import get_db
 from urjaa_core.models.admin_permission import AdminPermission
 from urjaa_core.models.admin_role import AdminRole
 from urjaa_core.models.admin_role_permission import AdminRolePermission
 from urjaa_core.models.admin_user import AdminUser
-from urjaa_core.models.base import Base
 
 
 DEFAULT_ADMIN_JWT_TTL_SECONDS = 60 * 60 * 12
@@ -583,190 +581,6 @@ def _resolve_required_permissions(path: str, method: str) -> set[str] | None:
         return set(rule.get("any_of") or set())
 
     return None
-
-
-def ensure_admin_auth_bootstrap(db: Session) -> None:
-    logger.info("admin_auth_bootstrap: starting schema creation")
-
-    Base.metadata.create_all(
-        bind=engine,
-        tables=[
-            AdminRole.__table__,
-            AdminPermission.__table__,
-            AdminRolePermission.__table__,
-            AdminUser.__table__,
-        ],
-    )
-
-    logger.info("admin_auth_bootstrap: schema creation complete, running migrations")
-
-    with engine.begin() as connection:
-        connection.execute(
-            text(
-                """
-                ALTER TABLE IF EXISTS admin_users
-                ADD COLUMN IF NOT EXISTS permissions JSONB NOT NULL DEFAULT '[]'::jsonb
-                """
-            )
-        )
-        connection.execute(
-            text(
-                """
-                ALTER TABLE IF EXISTS admin_users
-                ADD COLUMN IF NOT EXISTS role_id INTEGER
-                """
-            )
-        )
-        connection.execute(
-            text(
-                """
-                UPDATE admin_users
-                SET permissions = '[]'::jsonb
-                WHERE permissions IS NULL
-                """
-            )
-        )
-        connection.execute(
-            text(
-                """
-                DO $$
-                BEGIN
-                    IF EXISTS (
-                        SELECT 1
-                        FROM information_schema.tables
-                        WHERE table_schema = 'public' AND table_name = 'roles'
-                    ) THEN
-                        IF NOT EXISTS (
-                            SELECT 1
-                            FROM information_schema.table_constraints
-                            WHERE table_schema = 'public'
-                              AND table_name = 'admin_users'
-                              AND constraint_name = 'fk_admin_users_role_id'
-                        ) THEN
-                            ALTER TABLE admin_users
-                            ADD CONSTRAINT fk_admin_users_role_id
-                            FOREIGN KEY (role_id)
-                            REFERENCES roles(id)
-                            ON DELETE SET NULL;
-                        END IF;
-                    END IF;
-                END
-                $$;
-                """
-            )
-        )
-
-    with engine.begin() as connection:
-        connection.execute(
-            text(
-                """
-                DO $$
-                BEGIN
-                    IF NOT EXISTS (
-                        SELECT 1
-                        FROM information_schema.table_constraints
-                        WHERE table_schema = 'public'
-                          AND table_name = 'admin_users'
-                          AND constraint_name = 'fk_admin_users_role_id'
-                    ) THEN
-                        ALTER TABLE admin_users
-                        ADD CONSTRAINT fk_admin_users_role_id
-                        FOREIGN KEY (role_id)
-                        REFERENCES roles(id)
-                        ON DELETE SET NULL;
-                    END IF;
-                END
-                $$;
-                """
-            )
-        )
-
-    logger.info("admin_auth_bootstrap: seeding permissions and roles")
-
-    existing_permissions = {item.key: item for item in db.query(AdminPermission).all()}
-    for key, description in ADMIN_PERMISSION_DESCRIPTIONS.items():
-        row = existing_permissions.get(key)
-        if row is None:
-            db.add(AdminPermission(key=key, description=description))
-        elif row.description != description:
-            row.description = description
-    db.flush()
-
-    existing_roles = {item.name: item for item in db.query(AdminRole).all()}
-    for role_name, description in ROLE_DESCRIPTIONS.items():
-        row = existing_roles.get(role_name)
-        if row is None:
-            db.add(AdminRole(name=role_name, description=description))
-        elif row.description != description:
-            row.description = description
-    db.flush()
-
-    existing_permissions = {item.key: item for item in db.query(AdminPermission).all()}
-    existing_roles = {item.name: item for item in db.query(AdminRole).all()}
-
-    for role_name, default_permissions in DEFAULT_ROLE_PERMISSIONS.items():
-        role_row = existing_roles.get(role_name)
-        if role_row is None:
-            continue
-
-        existing_count = (
-            db.query(AdminRolePermission)
-            .filter(AdminRolePermission.role_id == role_row.id)
-            .count()
-        )
-        if existing_count > 0:
-            continue
-
-        for permission_key in sorted(default_permissions):
-            permission_row = existing_permissions.get(permission_key)
-            if permission_row is None:
-                continue
-            db.add(
-                AdminRolePermission(
-                    role_id=role_row.id,
-                    permission_id=permission_row.id,
-                )
-            )
-
-    role_id_lookup = {role.name: role.id for role in existing_roles.values()}
-    users = db.query(AdminUser).all()
-    for admin_user in users:
-        normalized_role = normalize_admin_role(admin_user.role or "super_admin")
-        if admin_user.role != normalized_role:
-            admin_user.role = normalized_role
-
-        next_role_id = role_id_lookup.get(normalized_role)
-        if next_role_id is not None and admin_user.role_id != next_role_id:
-            admin_user.role_id = next_role_id
-
-        if not isinstance(admin_user.permissions, list):
-            admin_user.permissions = []
-
-    has_admin = db.query(AdminUser.id).first()
-    if not has_admin:
-        default_email = normalize_admin_email(os.getenv("ADMIN_DEFAULT_EMAIL", "admin@urjaa.local"))
-        default_password = (os.getenv("ADMIN_DEFAULT_PASSWORD") or "admin123").strip()
-        default_role = normalize_admin_role((os.getenv("ADMIN_DEFAULT_ROLE") or "super_admin").strip() or "super_admin")
-
-        admin_user = AdminUser(
-            email=default_email,
-            password_hash=hash_admin_password(default_password),
-            role=default_role,
-            role_id=role_id_lookup.get(default_role),
-            permissions=[],
-            is_active=True,
-        )
-        db.add(admin_user)
-        logger.info("admin_auth_bootstrap: created default admin user email=%s role=%s", default_email, default_role)
-
-    try:
-        db.commit()
-    except Exception:
-        db.rollback()
-        logger.error("admin_auth_bootstrap: commit failed, rolled back")
-        raise
-
-    logger.info("admin_auth_bootstrap: complete")
 
 
 def hash_admin_password(password: str) -> str:
