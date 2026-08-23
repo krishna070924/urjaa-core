@@ -487,6 +487,17 @@ class OrderService:
 
         order.status = normalized_status
 
+        # H9 FIX: Restore stock when an admin cancels an order that already had stock
+        # deducted. PENDING, CONFIRMED, and PROCESSING orders all deduct stock at
+        # creation time (see create_order_from_cart) and can all transition to
+        # CANCELLED per VALID_ORDER_STATUS_TRANSITIONS above. Without this, admin
+        # cancellation permanently loses stock.
+        if normalized_status == "CANCELLED" and current_status in ("PENDING", "CONFIRMED", "PROCESSING"):
+            for item in order.items:
+                variant = item.variant
+                if variant is not None:
+                    variant.stock_quantity = (variant.stock_quantity or 0) + item.quantity
+
         linked_sale = (
             db.query(Sale)
             .filter(Sale.order_id == order.id, Sale.source == "website")
