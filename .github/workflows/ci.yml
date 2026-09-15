@@ -22,3 +22,5 @@ jobs:
       - run: alembic upgrade head
         env:
           DATABASE_URL: postgresql://postgres:postgres@localhost:5432/urjaa_test
+          STOREFRONT_DB_PASSWORD: ci_test_storefront_password
+          ADMIN_DB_PASSWORD: ci_test_admin_password
