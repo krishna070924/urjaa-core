@@ -82,8 +82,8 @@ class CheckoutSummaryRequest(BaseModel):
 
 class CheckoutSummaryResponse(BaseModel):
     order_id: UUID
-    subtotal: float
-    tax: float
-    grand_total: float
+    subtotal: Decimal
+    tax: Decimal
+    grand_total: Decimal
     formatted_tax: str
     formatted_grand_total: str
