@@ -667,6 +667,10 @@ def hash_admin_password(password: str) -> str:
     if not password:
         raise ValueError("Password cannot be empty")
 
+    normalized = password.strip()
+    if len(normalized) < 8:
+        raise ValueError("Password must be at least 8 characters")
+
     salt = secrets.token_bytes(16)
     digest = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, PBKDF2_ITERATIONS)
     return f"pbkdf2_sha256${PBKDF2_ITERATIONS}${_b64url_encode(salt)}${_b64url_encode(digest)}"
