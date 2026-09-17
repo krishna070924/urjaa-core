@@ -373,6 +373,62 @@ ADMIN_ROUTE_PERMISSION_RULES: list[dict[str, Any]] = [
         "methods": WRITE_METHODS,
         "any_of": {ADMIN_PERMISSION_MANAGE_CAMPAIGNS},
     },
+    # FIX: routes previously missing from ADMIN_ROUTE_PERMISSION_RULES (403'd for everyone, discovered 2026-09-18)
+    {
+        "pattern": re.compile(r"^/admin/upload-image$"),
+        "methods": {"POST"},
+        "any_of": {ADMIN_PERMISSION_MANAGE_CMS, ADMIN_PERMISSION_MANAGE_PRODUCTS},
+    },
+    {
+        "pattern": re.compile(r"^/admin/legal-pages(?:/.*)?$"),
+        "methods": None,
+        "any_of": {ADMIN_PERMISSION_MANAGE_CMS},
+    },
+    {
+        "pattern": re.compile(r"^/admin/reviews(?:/.*)?$"),
+        "methods": None,
+        "any_of": {ADMIN_PERMISSION_MANAGE_PRODUCTS},
+    },
+    {
+        "pattern": re.compile(r"^/admin/seo(?:/.*)?$"),
+        "methods": None,
+        "any_of": {ADMIN_PERMISSION_MANAGE_CMS},
+    },
+    {
+        "pattern": re.compile(r"^/admin/global-config(?:/.*)?$"),
+        "methods": None,
+        "any_of": {ADMIN_PERMISSION_MANAGE_CMS},
+    },
+    {
+        "pattern": re.compile(r"^/admin/store-locations(?:/.*)?$"),
+        "methods": None,
+        "any_of": {ADMIN_PERMISSION_MANAGE_STORE},
+    },
+    {
+        "pattern": re.compile(r"^/admin/contact-submissions(?:/.*)?$"),
+        "methods": None,
+        "any_of": {ADMIN_PERMISSION_MANAGE_CUSTOMERS},
+    },
+    {
+        "pattern": re.compile(r"^/admin/commission-requests(?:/.*)?$"),
+        "methods": {"GET"},
+        "any_of": {ADMIN_PERMISSION_VIEW_SALES, ADMIN_PERMISSION_MANAGE_SALES},
+    },
+    {
+        "pattern": re.compile(r"^/admin/commission-requests(?:/.*)?$"),
+        "methods": WRITE_METHODS,
+        "any_of": {ADMIN_PERMISSION_MANAGE_SALES},
+    },
+    {
+        "pattern": re.compile(r"^/admin/newsletter(?:/.*)?$"),
+        "methods": None,
+        "any_of": {ADMIN_PERMISSION_VIEW_REPORTS},
+    },
+    {
+        "pattern": re.compile(r"^/admin/search(?:/.*)?$"),
+        "methods": None,
+        "any_of": set(),  # Empty set = any authenticated admin
+    },
 ]
 
 
