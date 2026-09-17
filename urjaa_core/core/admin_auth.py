@@ -9,7 +9,7 @@ import secrets
 import time
 from typing import Any
 
-from fastapi import Depends, Header, HTTPException, Request
+from fastapi import Cookie, Depends, Header, HTTPException, Request, Response
 from sqlalchemy.orm import Session
 
 from urjaa_core.core.database import get_db
@@ -21,6 +21,30 @@ from urjaa_core.models.admin_user import AdminUser
 
 DEFAULT_ADMIN_JWT_TTL_SECONDS = 60 * 60 * 12
 PBKDF2_ITERATIONS = 200_000
+
+# H6 FIX: admin JWT now travels as an HttpOnly cookie instead of being stored in
+# localStorage (XSS-readable). COOKIE_SECURE defaults to false because nothing in
+# this stack serves HTTPS yet (nginx/TLS is a separate, already-deferred gap — see
+# urjaa-infrastructure docs M9) — a Secure cookie would silently never be set/sent
+# over the plain-http local stack. Set COOKIE_SECURE=true once TLS is wired up.
+ADMIN_AUTH_COOKIE_NAME = "admin_token"
+_COOKIE_SECURE = os.environ.get("COOKIE_SECURE", "false").strip().lower() == "true"
+
+
+def set_admin_auth_cookie(response: Response, token: str) -> None:
+    response.set_cookie(
+        key=ADMIN_AUTH_COOKIE_NAME,
+        value=token,
+        max_age=_get_ttl_seconds(),
+        httponly=True,
+        secure=_COOKIE_SECURE,
+        samesite="strict",
+        path="/",
+    )
+
+
+def clear_admin_auth_cookie(response: Response) -> None:
+    response.delete_cookie(key=ADMIN_AUTH_COOKIE_NAME, path="/")
 
 ADMIN_PERMISSION_MANAGE_USERS = "manage_admin_users"
 ADMIN_PERMISSION_MANAGE_ROLES = "manage_roles"
@@ -682,8 +706,11 @@ def get_bearer_token(authorization: str | None) -> str:
 
 def get_admin_token_payload(
     authorization: str | None = Header(default=None, alias="Authorization"),
+    admin_token_cookie: str | None = Cookie(default=None, alias=ADMIN_AUTH_COOKIE_NAME),
 ) -> dict[str, Any]:
-    token = get_bearer_token(authorization)
+    # H6 FIX: prefer the HttpOnly cookie; fall back to a Bearer header for any
+    # non-browser caller (scripts, the admin bootstrap CLI's own API calls, etc.)
+    token = admin_token_cookie or get_bearer_token(authorization)
     return decode_admin_access_token(token)
 
 
