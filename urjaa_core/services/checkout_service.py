@@ -32,7 +32,9 @@ class CheckoutService:
         return sorted_images[0].image_url
 
     @staticmethod
-    def create_order(db: Session, payload: CheckoutCreateRequest, store_id: UUID | None) -> Order:
+    def create_order(
+        db: Session, payload: CheckoutCreateRequest, store_id: UUID | None, user_id: UUID
+    ) -> Order:
         if not payload.items:
             raise HTTPException(status_code=400, detail="At least one checkout item is required")
 
@@ -142,6 +144,7 @@ class CheckoutService:
 
         order = Order(
             store_id=order_store_id,
+            user_id=user_id,
             email=normalized_email,
             full_name=payload.full_name,
             phone=payload.phone,
