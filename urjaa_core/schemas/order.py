@@ -1,4 +1,5 @@
 from datetime import datetime
+from decimal import Decimal
 from typing import Literal
 from uuid import UUID
 
@@ -31,8 +32,8 @@ class OrderItemResponse(BaseModel):
     product_name: str
     product_image: str | None
     quantity: int
-    price: float
-    line_total: float
+    price: Decimal
+    line_total: Decimal
 
     class Config:
         orm_mode = True
@@ -46,7 +47,7 @@ class OrderResponse(BaseModel):
     full_name: str
     phone: str | None
     shipping_address: OrderShippingAddress
-    total_amount: float
+    total_amount: Decimal
     currency: str
     payment_status: str
     formatted_total: str
