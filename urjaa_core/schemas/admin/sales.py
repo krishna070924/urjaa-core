@@ -1,4 +1,5 @@
 from datetime import datetime
+from decimal import Decimal
 from uuid import UUID
 from typing import Literal
 
@@ -89,10 +90,10 @@ class SaleResponse(BaseModel):
     customer_id: UUID | None = None
     customer_name: str | None = None
     quantity: int
-    total_amount: float
-    final_price: float
-    cost_price: float
-    profit: float
+    total_amount: Decimal
+    final_price: Decimal
+    cost_price: Decimal
+    profit: Decimal
     source: Literal["store", "website"]
     status: Literal["PENDING", "PROCESSING", "SHIPPED", "DELIVERED", "CANCELLED", "COMPLETED"]
     date_time: datetime

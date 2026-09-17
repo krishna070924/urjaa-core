@@ -19,6 +19,7 @@ jobs:
         with: { python-version: "3.11" }
       - run: pip install -e .[dev]
       - run: ruff check urjaa_core/
+      - run: pytest tests/ -v
       - run: alembic upgrade head
         env:
           DATABASE_URL: postgresql://postgres:postgres@localhost:5432/urjaa_test

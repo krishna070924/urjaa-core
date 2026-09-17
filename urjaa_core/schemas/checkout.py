@@ -1,3 +1,4 @@
+from decimal import Decimal
 from pydantic import BaseModel, Field
 from uuid import UUID
 
@@ -31,8 +32,8 @@ class CheckoutOrderItemResponse(BaseModel):
     product_id: UUID
     variant_id: UUID
     quantity: int
-    unit_price: float
-    line_total: float
+    unit_price: Decimal
+    line_total: Decimal
 
     class Config:
         orm_mode = True
@@ -45,7 +46,7 @@ class CheckoutOrderResponse(BaseModel):
     full_name: str
     phone: str | None
     shipping_address: dict
-    total_amount: float
+    total_amount: Decimal
     status: str
     items: list[CheckoutOrderItemResponse]
 

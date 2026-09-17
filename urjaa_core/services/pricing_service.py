@@ -1,6 +1,7 @@
 import logging
 import threading
 from datetime import datetime, timedelta
+from decimal import ROUND_HALF_UP, Decimal
 
 from urjaa_core.models.metal_purity import MetalPurity
 from urjaa_core.repositories.metal_rate_repository import MetalRateRepository
@@ -12,20 +13,37 @@ try:  # optional: surface pricing fallbacks in Sentry when it is configured
 except ImportError:  # pragma: no cover - Sentry is not installed in this project
     sentry_sdk = None
 
-# URJ-066: scalar metal-rate cache — {base_metal_id: (rate_float_or_None, ts)}.
+# M-8 FIX: money math runs entirely in Decimal now (was float). DB columns backing
+# these values (MetalRate.rate_per_gram, ProductVariant.*, Order/OrderItem/Sale
+# amounts) are already Numeric/DECIMAL and SQLAlchemy returns Decimal for them; the
+# old code immediately cast to float and accumulated `round(x, 2)` at every step,
+# which uses binary-float arithmetic and Python's ROUND_HALF_EVEN and can misround
+# (e.g. round(2.675, 2) == 2.67) with errors compounding across line items. Round
+# once, at the boundary where a final money value is produced, using ROUND_HALF_UP
+# (the conventional "round half up" behaviour expected for money), not at every
+# intermediate step.
+MONEY_QUANTIZE = Decimal("0.01")
+
+
+def round_money(value: Decimal) -> Decimal:
+    """Round a Decimal money value to 2dp using ROUND_HALF_UP, once, at a boundary."""
+    return value.quantize(MONEY_QUANTIZE, rounding=ROUND_HALF_UP)
+
+
+# URJ-066: scalar metal-rate cache — {base_metal_id: (rate_or_None, ts)}.
 # It must NEVER hold ORM objects. The previous cache stored MetalRate rows, which
 # (a) leaked detached instances across request sessions (DetachedInstanceError ->
 # HTTP 500) and (b) could serve a stale or None rate for up to the TTL, which made
-# the failure flap even after an admin set the rate. Caching plain floats removes
+# the failure flap even after an admin set the rate. Caching plain scalars removes
 # both hazards. A lock guards the check-then-set because FastAPI runs sync routes
 # in a thread pool, so concurrent requests share this module-level dict.
-_rate_cache: dict[int, tuple[float | None, datetime]] = {}
+_rate_cache: dict[int, tuple[Decimal | None, datetime]] = {}
 _rate_cache_ttl = timedelta(seconds=60)
 _rate_cache_lock = threading.Lock()
 
 
-def _get_cached_metal_rate(db, base_metal_id) -> float | None:
-    """Return the latest effective metal rate as a float, or None if unavailable.
+def _get_cached_metal_rate(db, base_metal_id) -> Decimal | None:
+    """Return the latest effective metal rate as a Decimal, or None if unavailable.
 
     A 60-second TTL scalar cache avoids an N+1 query when pricing a multi-item
     cart or a product list (one lookup per metal per minute, not one per variant).
@@ -37,7 +55,7 @@ def _get_cached_metal_rate(db, base_metal_id) -> float | None:
             return cached[0]
 
     rate_row = MetalRateRepository.get_latest_rate(db, base_metal_id)
-    rate_value = float(rate_row.rate_per_gram) if rate_row is not None else None
+    rate_value = rate_row.rate_per_gram if rate_row is not None else None
 
     with _rate_cache_lock:
         _rate_cache[base_metal_id] = (rate_value, now)
@@ -69,16 +87,19 @@ def _report_pricing_fallback(variant, base_metal_id) -> None:
 class PricingService:
 
     @staticmethod
-    def calculate_variant_price(variant, db, rate_cache: dict | None = None) -> float | None:
+    def calculate_variant_price(variant, db, rate_cache: dict | None = None) -> Decimal | None:
         """Price one variant, or return None when it cannot be priced.
 
         URJ-066: a missing metal rate no longer raises. Read paths (list/PDP/cart)
         treat None as "Price on Request"; checkout/order-creation treat None as a
         hard error and refuse to create a mispriced order.
+
+        Returns a Decimal rounded to 2dp (ROUND_HALF_UP) exactly once, at this
+        "price of one unit" boundary — callers must not re-round intermediate sums.
         """
         override = getattr(variant, "price_override", None)
         if override is not None:
-            return max(float(override), 0.0)
+            return max(round_money(Decimal(override)), Decimal("0"))
 
         base_metal_id = variant.base_metal_id
 
@@ -95,33 +116,33 @@ class PricingService:
             _report_pricing_fallback(variant, base_metal_id)
             return None
 
-        rate = float(metal_rate)
+        rate = Decimal(metal_rate)
 
-        purity_factor = 1.0
+        purity_factor = Decimal("1")
         purity = getattr(variant, "metal_purity", None)
         if purity is not None and getattr(purity, "numeric_purity", None) is not None:
-            purity_factor = float(purity.numeric_purity) / 100
+            purity_factor = Decimal(purity.numeric_purity) / Decimal("100")
         elif getattr(variant, "metal_purity_id", None):
             purity_row = db.query(MetalPurity).filter(MetalPurity.id == variant.metal_purity_id).first()
             if purity_row and purity_row.numeric_purity is not None:
-                purity_factor = float(purity_row.numeric_purity) / 100
+                purity_factor = Decimal(purity_row.numeric_purity) / Decimal("100")
 
         adjusted_rate = rate * purity_factor
 
-        weight = float(variant.metal_weight_grams or 0)
-        stone = float(variant.stone_cost or 0)
-        making = float(variant.making_charges or 0)
+        weight = Decimal(variant.metal_weight_grams or 0)
+        stone = Decimal(variant.stone_cost or 0)
+        making = Decimal(variant.making_charges or 0)
 
         computed_price = (weight * adjusted_rate) + stone + making
-        return max(computed_price, 0.0)
+        return max(round_money(computed_price), Decimal("0"))
 
     @staticmethod
-    def calculate_product_starting_price(product, db, rate_cache: dict | None = None) -> float | None:
+    def calculate_product_starting_price(product, db, rate_cache: dict | None = None) -> Decimal | None:
         """Return the lowest priceable variant price, or None if none can be priced."""
         if not product or not product.variants:
             return None
 
-        prices: list[float] = []
+        prices: list[Decimal] = []
         for variant in product.variants:
             price = PricingService.calculate_variant_price(variant, db, rate_cache=rate_cache)
             if price is not None:
