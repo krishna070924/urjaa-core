@@ -17,7 +17,9 @@ class UserLoginRequest(BaseModel):
 
 
 class UserRefreshRequest(BaseModel):
-    refresh_token: str = Field(min_length=16)
+    # H3 FIX: refresh_token now normally arrives via an HttpOnly cookie, not this
+    # field — kept optional for non-browser callers that can't use cookies.
+    refresh_token: str | None = Field(default=None, min_length=16)
 
 
 class UserLogoutRequest(BaseModel):

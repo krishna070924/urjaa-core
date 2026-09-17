@@ -11,7 +11,7 @@ from typing import Any
 from uuid import UUID, uuid4
 
 import bcrypt
-from fastapi import Depends, Header, HTTPException, Request
+from fastapi import Cookie, Depends, Header, HTTPException, Request, Response
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
@@ -25,6 +25,30 @@ from urjaa_core.models.user_refresh_token import UserRefreshToken
 DEFAULT_USER_ACCESS_JWT_TTL_SECONDS = 60 * 15
 DEFAULT_USER_REFRESH_TOKEN_TTL_SECONDS = 60 * 60 * 24 * 30
 DEFAULT_PASSWORD_RESET_TOKEN_TTL_SECONDS = 60 * 15
+
+# H3 FIX: refresh token now travels as an HttpOnly cookie instead of being
+# returned for the client to store in localStorage (XSS could read a
+# ~30-day-lived token there indefinitely). Secure defaults false because this
+# stack has no TLS yet (separate, already-tracked gap) - see the matching
+# admin_auth.COOKIE_SECURE note.
+USER_REFRESH_COOKIE_NAME = "refresh_token"
+_COOKIE_SECURE = os.environ.get("COOKIE_SECURE", "false").strip().lower() == "true"
+
+
+def set_user_refresh_cookie(response: Response, refresh_token: str) -> None:
+    response.set_cookie(
+        key=USER_REFRESH_COOKIE_NAME,
+        value=refresh_token,
+        max_age=_get_refresh_ttl_seconds(),
+        httponly=True,
+        secure=_COOKIE_SECURE,
+        samesite="strict",
+        path="/auth",
+    )
+
+
+def clear_user_refresh_cookie(response: Response) -> None:
+    response.delete_cookie(key=USER_REFRESH_COOKIE_NAME, path="/auth")
 
 USER_SOURCE_WEBSITE = "WEBSITE"
 USER_SOURCE_STORE = "STORE"
