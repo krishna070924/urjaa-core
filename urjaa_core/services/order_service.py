@@ -493,8 +493,18 @@ class OrderService:
         # CANCELLED per VALID_ORDER_STATUS_TRANSITIONS above. Without this, admin
         # cancellation permanently loses stock.
         if normalized_status == "CANCELLED" and current_status in ("PENDING", "CONFIRMED", "PROCESSING"):
+            variant_ids = [item.variant_id for item in order.items if item.variant_id is not None]
+            # H9 FIX (locking): lock the variant rows before the read-modify-write,
+            # matching create_order_from_cart's deduction locking above.
+            locked_variants = (
+                db.query(ProductVariant)
+                .filter(ProductVariant.id.in_(variant_ids))
+                .with_for_update()
+                .all()
+            )
+            variants_by_id = {variant.id: variant for variant in locked_variants}
             for item in order.items:
-                variant = item.variant
+                variant = variants_by_id.get(item.variant_id)
                 if variant is not None:
                     variant.stock_quantity = (variant.stock_quantity or 0) + item.quantity
 
