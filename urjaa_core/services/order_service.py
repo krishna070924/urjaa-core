@@ -1,4 +1,5 @@
 import logging
+from decimal import Decimal
 from math import ceil
 from uuid import UUID
 
@@ -15,7 +16,7 @@ from urjaa_core.models.product import Product
 from urjaa_core.models.product_variant import ProductVariant
 from urjaa_core.models.sale import Sale
 from urjaa_core.models.user import User
-from urjaa_core.services.pricing_service import PricingService
+from urjaa_core.services.pricing_service import PricingService, round_money
 
 ORDER_STATUS_VALUES = ("PENDING", "CONFIRMED", "PROCESSING", "SHIPPED", "DELIVERED", "CANCELLED")
 ORDER_STATUS_SET = set(ORDER_STATUS_VALUES)
@@ -159,9 +160,9 @@ class OrderService:
             len(cart_items),
         )
 
-        total_amount = 0.0
+        total_amount = Decimal("0")
         total_quantity = 0
-        total_cost_amount = 0.0
+        total_cost_amount = Decimal("0")
         order_items: list[OrderItem] = []
         rate_cache: dict[int, object] = {}
 
@@ -202,16 +203,20 @@ class OrderService:
                     status_code=503,
                     detail=f"Pricing is temporarily unavailable for {product.name}. Please try again shortly.",
                 )
-            unit_price = round(float(raw_price), 2)
+            # raw_price is already a Decimal rounded once at calculate_variant_price's
+            # "price of one unit" boundary — no float cast, no re-round needed here.
+            unit_price = raw_price
             if unit_price <= 0:
                 raise HTTPException(status_code=400, detail=f"Unable to compute price for {product.name}")
 
-            line_total = round(unit_price * requested_quantity, 2)
-            total_amount = round(total_amount + line_total, 2)
+            # A genuine multiplication, so it gets its own single rounding point.
+            line_total = round_money(unit_price * requested_quantity)
+            # Both operands already 2dp Decimals -> exact addition, no rounding needed.
+            total_amount = total_amount + line_total
             total_quantity += requested_quantity
 
-            line_cost_total = round(float(variant.cost_price or 0) * requested_quantity, 2)
-            total_cost_amount = round(total_cost_amount + line_cost_total, 2)
+            line_cost_total = round_money(Decimal(variant.cost_price or Decimal("0")) * requested_quantity)
+            total_cost_amount = total_cost_amount + line_cost_total
 
             variant.stock_quantity = available_stock - requested_quantity
 
@@ -290,7 +295,8 @@ class OrderService:
                 total_amount=total_amount,
                 final_price=total_amount,
                 cost_price=total_cost_amount,
-                profit=round(total_amount - total_cost_amount, 2),
+                # Both operands already 2dp Decimals -> exact subtraction, no rounding needed.
+                profit=total_amount - total_cost_amount,
                 source="website",
                 status="PENDING",
                 date_time=order.created_at,

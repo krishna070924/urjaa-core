@@ -1,4 +1,5 @@
 import logging
+from decimal import Decimal
 from uuid import UUID
 
 from fastapi import HTTPException
@@ -9,7 +10,7 @@ from urjaa_core.models.order_item import OrderItem
 from urjaa_core.models.product import Product
 from urjaa_core.models.product_variant import ProductVariant
 from urjaa_core.schemas.checkout import CheckoutCreateRequest
-from urjaa_core.services.pricing_service import PricingService
+from urjaa_core.services.pricing_service import PricingService, round_money
 
 
 class CheckoutService:
@@ -43,7 +44,7 @@ class CheckoutService:
             raise HTTPException(status_code=400, detail="A valid email is required")
 
         order_items: list[OrderItem] = []
-        total_amount = 0.0
+        total_amount = Decimal("0")
 
         item_store_ids: list[str] = []
 
@@ -90,8 +91,12 @@ class CheckoutService:
             if unit_price <= 0:
                 raise HTTPException(status_code=400, detail="Unable to compute a valid item price")
 
-            line_total = round(unit_price * item.quantity, 2)
-            total_amount = round(total_amount + line_total, 2)
+            # unit_price is already rounded once (calculate_variant_price's boundary);
+            # this multiplication is the one place line_total needs its own rounding.
+            line_total = round_money(unit_price * item.quantity)
+            # Both operands are already 2dp Decimals, so Decimal addition here is
+            # exact — no binary-float error to compound, so no further rounding.
+            total_amount = total_amount + line_total
 
             # FIX 2.2 + FIX 3.1: Check stock availability without deducting.
             # Actual stock deduction happens in the payment webhook (_handle_payment_captured)
