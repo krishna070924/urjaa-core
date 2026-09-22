@@ -8,6 +8,7 @@ from urjaa_core.models.cart import Cart
 from urjaa_core.models.cart_item import CartItem
 from urjaa_core.models.product import Product
 from urjaa_core.models.product_variant import ProductVariant
+from urjaa_core.models.variant_attribute import VariantAttribute
 from urjaa_core.schemas.cart import CartItemResponse, CartResponse
 from urjaa_core.services.pricing_service import PricingService
 from urjaa_core.utils.currency import format_inr
@@ -75,7 +76,9 @@ class CartService:
             db.query(CartItem)
             .options(
                 joinedload(CartItem.product).joinedload(Product.images),
-                joinedload(CartItem.variant),
+                joinedload(CartItem.variant)
+                .joinedload(ProductVariant.attribute_values)
+                .joinedload(VariantAttribute.attribute_value),
             )
             .filter(CartItem.cart_id == cart.id)
             .all()
@@ -109,7 +112,7 @@ class CartService:
                     quantity=int(item.quantity),
                     product_name=item.product.name,
                     product_slug=item.product.slug,
-                    variant_size=item.variant.size,
+                    variant_size=item.variant.attribute_label,
                     image_url=CartService._select_product_image_url(item.product),
                     unit_price=unit_price,
                     line_total=line_total,
