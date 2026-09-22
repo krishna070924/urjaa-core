@@ -20,7 +20,6 @@ from .product_collection import ProductCollection
 from .tag import Tag
 from .product_tag import ProductTag
 from .product_image import ProductImage
-from .customer import Customer
 from .sale import Sale
 from .order import Order
 from .order_item import OrderItem
