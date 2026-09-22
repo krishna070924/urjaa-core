@@ -27,8 +27,6 @@ class ProductVariant(Base):
     metal_color_id = Column(Integer, ForeignKey("metal_colors.id"))
     metal_purity_id = Column(Integer, ForeignKey("metal_purities.id"))
 
-    size = Column(String(20))
-
     weight = Column(DECIMAL(10, 3))
     metal_type = Column(String(50))
     metal_weight_grams = Column(DECIMAL(10, 3))
@@ -49,3 +47,5 @@ class ProductVariant(Base):
     base_metal = relationship("BaseMetal")
     metal_color = relationship("MetalColor")
     metal_purity = relationship("MetalPurity")
+
+    attribute_values = relationship("VariantAttribute", back_populates="variant")
