@@ -238,18 +238,15 @@ class MetalColorUpdateRequest(BaseModel):
 
 class StoreCreateRequest(BaseModel):
     name: str = Field(min_length=1, max_length=120)
-    location: str | None = None
 
 
 class StoreUpdateRequest(BaseModel):
     name: str = Field(min_length=1, max_length=120)
-    location: str | None = None
 
 
 class AdminStoreResponse(BaseModel):
     id: UUID
     name: str
-    location: str | None = None
 
     class Config:
         orm_mode = True

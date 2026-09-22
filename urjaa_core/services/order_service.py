@@ -237,7 +237,6 @@ class OrderService:
                     product_name=product.name,
                     product_image=OrderService._select_product_image_url(cart_item),
                     quantity=requested_quantity,
-                    price=unit_price,
                     unit_price=unit_price,
                     line_total=line_total,
                 )

@@ -17,13 +17,13 @@ from urjaa_core.models.subcategory import Subcategory
 from urjaa_core.models.user import User
 
 
-def _ensure_store(name: str, location: str | None) -> Store:
+def _ensure_store(name: str) -> Store:
     with SessionLocal() as db:
         store = db.query(Store).filter(Store.name == name).first()
         if store:
             return store
 
-        store = Store(id=uuid.uuid4(), name=name, location=location)
+        store = Store(id=uuid.uuid4(), name=name)
         db.add(store)
         db.commit()
         db.refresh(store)
@@ -198,7 +198,7 @@ def _seed_store_data(store: Store, store_code: str, lookups: dict[str, str]) -> 
                     full_name=name,
                     phone=f"9998800{idx:03d}",
                     source=USER_SOURCE_STORE,
-                    address=f"{store.location or 'Unknown'}",
+                    address="Unknown",
                     provider="local",
                     provider_id=None,
                     is_active=True,
@@ -209,7 +209,7 @@ def _seed_store_data(store: Store, store_code: str, lookups: dict[str, str]) -> 
                 customer.full_name = customer.full_name or name
                 customer.phone = customer.phone or f"9998800{idx:03d}"
                 customer.source = customer.source or USER_SOURCE_STORE
-                customer.address = customer.address or f"{store.location or 'Unknown'}"
+                customer.address = customer.address or "Unknown"
             customers.append(customer)
 
         db.flush()
@@ -250,8 +250,8 @@ def _seed_store_data(store: Store, store_code: str, lookups: dict[str, str]) -> 
 def main() -> None:
     lookups = _ensure_lookup_data()
 
-    urjaa_1 = _ensure_store("Urjaa 1", "Vaishali Nagar")
-    urjaa_2 = _ensure_store("Urjaa 2", "Malviya Nagar")
+    urjaa_1 = _ensure_store("Urjaa 1")
+    urjaa_2 = _ensure_store("Urjaa 2")
 
     _seed_store_data(urjaa_1, "urjaa1", lookups)
     _seed_store_data(urjaa_2, "urjaa2", lookups)

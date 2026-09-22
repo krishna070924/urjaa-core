@@ -124,7 +124,6 @@ class CheckoutService:
                     product_name=product.name,
                     product_image=CheckoutService._select_product_image_url(product),
                     quantity=item.quantity,
-                    price=unit_price,
                     unit_price=unit_price,
                     line_total=line_total,
                 )

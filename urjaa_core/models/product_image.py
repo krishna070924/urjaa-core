@@ -8,7 +8,7 @@ class ProductImage(Base):
     __tablename__ = "product_images"
 
     id = Column(Integer, primary_key=True)
-    product_id = Column(ForeignKey("products.id", ondelete="CASCADE"), nullable=False)
+    product_id = Column(ForeignKey("products.id", ondelete="CASCADE"), nullable=False, index=True)
 
     image_url = Column(String, nullable=False)
     is_primary = Column(Boolean, default=False)
