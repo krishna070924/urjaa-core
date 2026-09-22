@@ -23,6 +23,8 @@ from urjaa_core.models.stone import Stone
 from urjaa_core.models.subcategory import Subcategory
 from urjaa_core.models.tag import Tag
 from urjaa_core.models.variant_type import VariantType
+from urjaa_core.models.variant_type_attribute import VariantTypeAttribute
+from urjaa_core.models.variant_attribute import VariantAttribute
 from urjaa_core.models.sale import Sale
 
 
@@ -364,11 +366,25 @@ class AdminManagementRepository:
 
     @staticmethod
     def get_variant_types(db: Session) -> list[VariantType]:
-        return db.query(VariantType).order_by(VariantType.display_order.asc().nullslast(), VariantType.name.asc()).all()
+        return (
+            db.query(VariantType)
+            .options(selectinload(VariantType.attributes))
+            .order_by(VariantType.display_order.asc().nullslast(), VariantType.name.asc())
+            .all()
+        )
 
     @staticmethod
     def get_variant_type_by_id(db: Session, variant_type_id: int) -> VariantType | None:
-        return db.query(VariantType).filter(VariantType.id == variant_type_id).first()
+        return (
+            db.query(VariantType)
+            .options(
+                selectinload(VariantType.attributes)
+                .selectinload(VariantTypeAttribute.attribute)
+                .selectinload(Attribute.values)
+            )
+            .filter(VariantType.id == variant_type_id)
+            .first()
+        )
 
     @staticmethod
     def get_variant_type_by_slug(db: Session, slug: str) -> VariantType | None:
@@ -390,6 +406,12 @@ class AdminManagementRepository:
     @staticmethod
     def delete_variant_type(db: Session, variant_type: VariantType) -> None:
         db.delete(variant_type)
+
+    @staticmethod
+    def replace_variant_type_attributes(db: Session, variant_type_id: int, attribute_ids: list[int]) -> None:
+        db.query(VariantTypeAttribute).filter(VariantTypeAttribute.variant_type_id == variant_type_id).delete()
+        for attribute_id in attribute_ids:
+            db.add(VariantTypeAttribute(variant_type_id=variant_type_id, attribute_id=attribute_id))
 
     @staticmethod
     def get_collections(db: Session) -> list[Collection]:
@@ -908,6 +930,12 @@ class AdminManagementRepository:
         return db.query(AttributeValue).filter(AttributeValue.id.in_(ids)).all()
 
     @staticmethod
+    def get_attributes_by_ids(db: Session, ids: list[int]) -> list[Attribute]:
+        if not ids:
+            return []
+        return db.query(Attribute).filter(Attribute.id.in_(ids)).all()
+
+    @staticmethod
     def get_stones_by_ids(db: Session, ids: list[int]) -> list[Stone]:
         if not ids:
             return []
@@ -918,6 +946,12 @@ class AdminManagementRepository:
         db.query(ProductAttribute).filter(ProductAttribute.product_id == product_id).delete()
         for value_id in attribute_value_ids:
             db.add(ProductAttribute(product_id=product_id, attribute_value_id=value_id))
+
+    @staticmethod
+    def replace_variant_attributes(db: Session, variant_id: UUID, attribute_value_ids: list[int]) -> None:
+        db.query(VariantAttribute).filter(VariantAttribute.variant_id == variant_id).delete()
+        for value_id in attribute_value_ids:
+            db.add(VariantAttribute(variant_id=variant_id, attribute_value_id=value_id))
 
     @staticmethod
     def replace_product_stones(

@@ -567,7 +567,6 @@ class AdminManagementService:
                 {
                     "product_slug": product_slug,
                     "variant": {
-                        "size": normalized.get("size") or None,
                         "base_metal_id": parsed_base_metal_id,
                         "metal_color_id": parsed_metal_color_id,
                         "metal_purity_id": parsed_metal_purity_id,
@@ -615,7 +614,6 @@ class AdminManagementService:
                 variant = ProductVariant(
                     store_id=store_id,
                     product_id=product.id,
-                    size=variant_payload["size"],
                     base_metal_id=variant_payload["base_metal_id"],
                     metal_color_id=variant_payload["metal_color_id"],
                     metal_purity_id=variant_payload["metal_purity_id"],
@@ -760,7 +758,17 @@ class AdminManagementService:
             lambda candidate: AdminManagementRepository.get_subcategory_by_slug(db, candidate) is not None,
         )
 
-        subcategory = Subcategory(category_id=payload.category_id, name=name, slug=slug)
+        if payload.default_variant_type_id is not None:
+            variant_type = AdminManagementRepository.get_variant_type_by_id(db, payload.default_variant_type_id)
+            if not variant_type:
+                raise HTTPException(status_code=404, detail="Variant type not found")
+
+        subcategory = Subcategory(
+            category_id=payload.category_id,
+            name=name,
+            slug=slug,
+            default_variant_type_id=payload.default_variant_type_id,
+        )
         try:
             created = AdminManagementRepository.create_subcategory(db, subcategory)
             db.commit()
@@ -792,6 +800,12 @@ class AdminManagementService:
                         and existing.id != subcategory.id
                     ),
                 )
+
+        if payload.default_variant_type_id is not None:
+            variant_type = AdminManagementRepository.get_variant_type_by_id(db, payload.default_variant_type_id)
+            if not variant_type:
+                raise HTTPException(status_code=404, detail="Variant type not found")
+            subcategory.default_variant_type_id = payload.default_variant_type_id
 
         try:
             db.commit()
@@ -829,6 +843,12 @@ class AdminManagementService:
             lambda candidate: AdminManagementRepository.get_variant_type_by_slug(db, candidate) is not None,
         )
 
+        attribute_ids = list(dict.fromkeys(payload.attribute_ids or []))
+        if attribute_ids:
+            attributes = AdminManagementRepository.get_attributes_by_ids(db, attribute_ids)
+            if len(attributes) != len(attribute_ids):
+                raise HTTPException(status_code=400, detail="One or more attribute ids are invalid")
+
         variant_type = VariantType(
             name=name,
             slug=slug,
@@ -838,7 +858,9 @@ class AdminManagementService:
 
         try:
             created = AdminManagementRepository.create_variant_type(db, variant_type)
+            AdminManagementRepository.replace_variant_type_attributes(db, created.id, attribute_ids)
             db.commit()
+            db.refresh(created)
             return created
         except Exception:
             db.rollback()
@@ -867,13 +889,29 @@ class AdminManagementService:
             if value is not None:
                 setattr(variant_type, field, value)
 
+        if payload.attribute_ids is not None:
+            attribute_ids = list(dict.fromkeys(payload.attribute_ids))
+            if attribute_ids:
+                attributes = AdminManagementRepository.get_attributes_by_ids(db, attribute_ids)
+                if len(attributes) != len(attribute_ids):
+                    raise HTTPException(status_code=400, detail="One or more attribute ids are invalid")
+            AdminManagementRepository.replace_variant_type_attributes(db, variant_type.id, attribute_ids)
+
         try:
             AdminManagementRepository.update_variant_type(db, variant_type)
             db.commit()
+            db.refresh(variant_type)
             return variant_type
         except Exception:
             db.rollback()
             raise
+
+    @staticmethod
+    def get_variant_type_attributes(db: Session, variant_type_id: int) -> list[Attribute]:
+        variant_type = AdminManagementRepository.get_variant_type_by_id(db, variant_type_id)
+        if not variant_type:
+            raise HTTPException(status_code=404, detail="Variant type not found")
+        return [link.attribute for link in variant_type.attributes if link.attribute is not None]
 
     @staticmethod
     def delete_variant_type(db: Session, variant_type_id: int) -> None:
@@ -1660,7 +1698,6 @@ class AdminManagementService:
         seen_payload_skus: set[str] = set()
 
         for index, variant_item in enumerate(payload.variants or []):
-            candidate_size = (variant_item.size or "").strip() or None
             candidate_sku = (variant_item.sku_code or "").strip()
 
             if not candidate_sku:
@@ -1686,7 +1723,6 @@ class AdminManagementService:
             seen_payload_skus.add(dedupe_key)
             normalized_variants.append(
                 {
-                    "size": candidate_size,
                     "stock_quantity": variant_item.stock_quantity,
                     "price_override": variant_item.price_override,
                     "sku_code": normalized_sku,
@@ -1709,7 +1745,6 @@ class AdminManagementService:
                     ProductVariant(
                         store_id=store_id,
                         product_id=created.id,
-                        size=variant_item["size"],
                         stock_quantity=variant_item["stock_quantity"],
                         price_override=variant_item["price_override"],
                         sku_code=variant_item["sku_code"],
@@ -1828,6 +1863,32 @@ class AdminManagementService:
             raise
 
     @staticmethod
+    def _validate_variant_attribute_value_ids(db: Session, attribute_value_ids: list[int]) -> list[AttributeValue]:
+        """A variant can't carry two different values of the same Attribute
+        (e.g. Ring Size 6 and Ring Size 7 at once). Returns the resolved,
+        de-duplicated AttributeValue rows for the caller to persist."""
+        normalized_ids = list(dict.fromkeys(attribute_value_ids or []))
+        if not normalized_ids:
+            return []
+
+        values = AdminManagementRepository.get_attribute_values_by_ids(db, normalized_ids)
+        if len(values) != len(normalized_ids):
+            raise HTTPException(status_code=400, detail="One or more attribute value ids are invalid")
+
+        seen_attributes: dict[int, AttributeValue] = {}
+        for value in values:
+            collision = seen_attributes.get(value.attribute_id)
+            if collision is not None:
+                attribute_name = value.attribute.name if value.attribute else str(value.attribute_id)
+                raise AdminManagementService._field_error(
+                    "attribute_value_ids",
+                    f"Variant cannot have two values for attribute '{attribute_name}'",
+                )
+            seen_attributes[value.attribute_id] = value
+
+        return values
+
+    @staticmethod
     def create_variant(
         db: Session,
         store_id: UUID,
@@ -1841,6 +1902,10 @@ class AdminManagementService:
         existing_sku = AdminManagementRepository.get_variant_by_sku(db, payload.sku_code, store_id=store_id)
         if existing_sku:
             raise HTTPException(status_code=409, detail="Variant SKU already exists")
+
+        attribute_values = AdminManagementService._validate_variant_attribute_value_ids(
+            db, payload.attribute_value_ids
+        )
 
         if payload.base_metal_id is not None:
             metal_type = AdminManagementRepository.get_metal_type_by_id(db, payload.base_metal_id)
@@ -1860,7 +1925,6 @@ class AdminManagementService:
         variant = ProductVariant(
             store_id=store_id,
             product_id=product_id,
-            size=payload.size,
             base_metal_id=payload.base_metal_id,
             metal_type=payload.metal_type or (metal_type.name if metal_type else None),
             metal_color_id=payload.metal_color_id,
@@ -1878,7 +1942,11 @@ class AdminManagementService:
 
         try:
             created = AdminManagementRepository.create_variant(db, variant)
+            AdminManagementRepository.replace_variant_attributes(
+                db, created.id, [value.id for value in attribute_values]
+            )
             db.commit()
+            db.refresh(created)
             return created
         except Exception:
             db.rollback()
@@ -1914,8 +1982,11 @@ class AdminManagementService:
             if not metal_purity:
                 raise HTTPException(status_code=404, detail="Metal purity not found")
 
+        attribute_values = AdminManagementService._validate_variant_attribute_value_ids(
+            db, payload.attribute_value_ids
+        )
+
         for field in [
-            "size",
             "base_metal_id",
             "metal_type",
             "metal_color_id",
@@ -1940,6 +2011,9 @@ class AdminManagementService:
             variant.weight = payload.metal_weight_grams
 
         try:
+            AdminManagementRepository.replace_variant_attributes(
+                db, variant.id, [value.id for value in attribute_values]
+            )
             db.commit()
             db.refresh(variant)
             return variant

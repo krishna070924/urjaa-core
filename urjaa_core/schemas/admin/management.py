@@ -10,7 +10,6 @@ ProductGender = Literal["men", "women", "unisex"]
 
 
 class ProductCreateVariantItem(BaseModel):
-    size: str | None = Field(default=None, max_length=20)
     stock_quantity: int = Field(default=0, ge=0)
     price_override: float | None = Field(default=None, ge=0)
     sku_code: str | None = Field(default=None, min_length=1, max_length=100)
@@ -51,7 +50,7 @@ class ProductUpdateRequest(BaseModel):
 
 
 class VariantCreateRequest(BaseModel):
-    size: str | None = Field(default=None, max_length=20)
+    attribute_value_ids: list[int] = Field(default_factory=list)
     base_metal_id: int | None = Field(default=None, gt=0)
     metal_type: str | None = Field(default=None, min_length=1, max_length=50)
     metal_color_id: int | None = Field(default=None, gt=0)
@@ -68,7 +67,7 @@ class VariantCreateRequest(BaseModel):
 
 
 class VariantUpdateRequest(BaseModel):
-    size: str | None = Field(default=None, max_length=20)
+    attribute_value_ids: list[int] = Field(default_factory=list)
     base_metal_id: int | None = Field(default=None, gt=0)
     metal_type: str | None = Field(default=None, min_length=1, max_length=50)
     metal_color_id: int | None = Field(default=None, gt=0)
@@ -122,11 +121,13 @@ class CategoryUpdateRequest(BaseModel):
 class SubcategoryCreateRequest(BaseModel):
     category_id: int = Field(gt=0)
     name: str = Field(min_length=1, max_length=120)
+    default_variant_type_id: int | None = Field(default=None, gt=0)
 
 
 class SubcategoryUpdateRequest(BaseModel):
     category_id: int | None = Field(default=None, gt=0)
     name: str | None = Field(default=None, min_length=1, max_length=120)
+    default_variant_type_id: int | None = Field(default=None, gt=0)
 
 
 class CollectionCreateRequest(BaseModel):
@@ -200,12 +201,14 @@ class VariantTypeCreateRequest(BaseModel):
     name: str = Field(min_length=1, max_length=120)
     description: str | None = None
     display_order: int | None = None
+    attribute_ids: list[int] = Field(default_factory=list)
 
 
 class VariantTypeUpdateRequest(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=120)
     description: str | None = None
     display_order: int | None = None
+    attribute_ids: list[int] | None = None
 
 
 class MetalTypeCreateRequest(BaseModel):
@@ -274,6 +277,7 @@ class AdminSubcategoryLookupResponse(BaseModel):
     category_id: int | None
     name: str
     slug: str
+    default_variant_type_id: int | None = None
 
     class Config:
         orm_mode = True
@@ -285,6 +289,7 @@ class AdminVariantTypeLookupResponse(BaseModel):
     slug: str
     description: str | None = None
     display_order: int | None = None
+    attribute_ids: list[int] = Field(default_factory=list)
 
     class Config:
         orm_mode = True
@@ -407,7 +412,7 @@ class AdminProductListResponse(BaseModel):
 class AdminVariantResponse(BaseModel):
     id: UUID
     product_id: UUID
-    size: str | None
+    attribute_values: list[AdminAttributeValueLookupResponse] = Field(default_factory=list)
     base_metal_id: int | None
     metal_type: str | None
     metal_color_id: int | None

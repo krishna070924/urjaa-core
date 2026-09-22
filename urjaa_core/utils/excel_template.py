@@ -69,7 +69,6 @@ PRODUCT_COLUMNS = [
 VARIANT_COLUMNS = [
     ("product_name",       True,  "Gold Filigree Necklace",  "Must exactly match a product_name in the Products sheet"),
     ("variant_sku",        True,  "GFN-22K-16IN",            "Unique SKU code for this variant"),
-    ("size",               False, "16in",                    "E.g. 14in, 16in, S, M, L"),
     ("stock_quantity",     False, "10",                      "Integer >= 0  (default: 0)"),
     ("price_override",     False, "5500",                    "Fixed price in INR; overrides metal-rate computation if set"),
     ("metal_weight_grams", False, "8.5",                     "Decimal grams of metal (used in computed price)"),
@@ -115,7 +114,7 @@ def _build_variants_sheet(wb: openpyxl.Workbook):
         cell = ws.cell(row=2, column=col_idx)
         _example_cell(cell, example)
 
-    _set_col_widths(ws, [30, 18, 10, 14, 16, 20, 18, 14, 16])
+    _set_col_widths(ws, [30, 18, 14, 16, 20, 18, 14, 16])
     return ws
 
 
