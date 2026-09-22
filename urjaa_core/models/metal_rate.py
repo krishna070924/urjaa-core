@@ -1,4 +1,4 @@
-from sqlalchemy import CheckConstraint, Column, Integer, Numeric, ForeignKey, TIMESTAMP
+from sqlalchemy import CheckConstraint, Column, Integer, Numeric, ForeignKey, TIMESTAMP, UniqueConstraint
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 
@@ -9,6 +9,7 @@ class MetalRate(Base):
     __tablename__ = "metal_rates"
     __table_args__ = (
         CheckConstraint("rate_per_gram > 0", name="chk_metal_rates_rate_positive"),
+        UniqueConstraint("base_metal_id", "effective_from", name="uq_metal_rates_base_metal_effective_from"),
     )
 
     id = Column(Integer, primary_key=True)

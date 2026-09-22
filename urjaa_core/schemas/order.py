@@ -32,7 +32,7 @@ class OrderItemResponse(BaseModel):
     product_name: str
     product_image: str | None
     quantity: int
-    price: Decimal
+    unit_price: Decimal
     line_total: Decimal
 
     class Config:

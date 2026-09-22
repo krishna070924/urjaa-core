@@ -19,7 +19,6 @@ class OrderItem(Base):
     product_image = Column(Text, nullable=True)
 
     quantity = Column(Integer, nullable=False)
-    price = Column(Numeric(12, 2), nullable=True)
     unit_price = Column(Numeric(12, 2), nullable=False)
     line_total = Column(Numeric(12, 2), nullable=False)
 

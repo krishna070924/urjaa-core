@@ -21,7 +21,7 @@ class ProductVariant(Base):
 
     store_id = Column(UUID(as_uuid=True), ForeignKey("stores.id"), nullable=False, index=True)
 
-    product_id = Column(UUID(as_uuid=True), ForeignKey("products.id"))
+    product_id = Column(UUID(as_uuid=True), ForeignKey("products.id"), index=True)
 
     base_metal_id = Column(Integer, ForeignKey("base_metals.id"))
     metal_color_id = Column(Integer, ForeignKey("metal_colors.id"))
