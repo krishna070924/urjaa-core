@@ -921,6 +921,12 @@ class AdminManagementService:
             raise HTTPException(status_code=404, detail="Variant type not found")
 
         try:
+            # variant_type_attributes.variant_type_id is ON DELETE SET NULL, not
+            # CASCADE - without this, deleting the VariantType leaves orphaned
+            # variant_type_attributes rows (variant_type_id=NULL) that still
+            # point at their attribute_id, permanently blocking that Attribute
+            # from ever being deleted. Clear the junction explicitly first.
+            AdminManagementRepository.replace_variant_type_attributes(db, variant_type_id, [])
             AdminManagementRepository.delete_variant_type(db, variant_type)
             db.commit()
         except IntegrityError:
