@@ -15,4 +15,7 @@ class Subcategory(Base):
 
     slug = Column(String(150), unique=True, nullable=False)
 
+    default_variant_type_id = Column(Integer, ForeignKey("variant_types.id"), nullable=True)
+
     category = relationship("Category")
+    default_variant_type = relationship("VariantType")

@@ -4,6 +4,8 @@ from .category import Category
 
 from .product_variant import ProductVariant
 from .variant_type import VariantType
+from .variant_type_attribute import VariantTypeAttribute
+from .variant_attribute import VariantAttribute
 from .metal_type import MetalType
 from .base_metal import BaseMetal
 from .metal_color import MetalColor

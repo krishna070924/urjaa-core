@@ -16,3 +16,5 @@ class AttributeValue(Base):
     attribute = relationship("Attribute", back_populates="values")
 
     products = relationship("ProductAttribute", back_populates="attribute_value")
+
+    variant_attributes = relationship("VariantAttribute", back_populates="attribute_value")
