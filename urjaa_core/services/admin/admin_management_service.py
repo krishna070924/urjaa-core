@@ -27,6 +27,7 @@ from urjaa_core.models.stone import Stone
 from urjaa_core.models.subcategory import Subcategory
 from urjaa_core.models.tag import Tag
 from urjaa_core.models.variant_type import VariantType
+from urjaa_core.models.variant_attribute import VariantAttribute
 from urjaa_core.models.sale import Sale
 from urjaa_core.models.store import Store
 from urjaa_core.repositories.admin.admin_management_repository import AdminManagementRepository
@@ -1830,6 +1831,13 @@ class AdminManagementService:
             # Keep deletes ordered to prevent FK failures.
             deleted_sales = db.query(Sale).filter(Sale.product_id == product_id).delete(synchronize_session=False)
             deleted_images = db.query(ProductImage).filter(ProductImage.product_id == product_id).delete(synchronize_session=False)
+            variant_ids_subquery = db.query(ProductVariant.id).filter(
+                ProductVariant.product_id == product_id,
+                ProductVariant.store_id == store_id,
+            ).subquery()
+            db.query(VariantAttribute).filter(
+                VariantAttribute.variant_id.in_(db.query(variant_ids_subquery.c.id))
+            ).delete(synchronize_session=False)
             deleted_variants = db.query(ProductVariant).filter(
                 ProductVariant.product_id == product_id,
                 ProductVariant.store_id == store_id,

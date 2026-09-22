@@ -868,6 +868,7 @@ class AdminManagementRepository:
 
     @staticmethod
     def delete_variant(db: Session, variant: ProductVariant) -> None:
+        db.query(VariantAttribute).filter(VariantAttribute.variant_id == variant.id).delete()
         db.delete(variant)
 
     @staticmethod
