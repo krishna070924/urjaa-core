@@ -49,3 +49,16 @@ class ProductVariant(Base):
     metal_purity = relationship("MetalPurity")
 
     attribute_values = relationship("VariantAttribute", back_populates="variant")
+
+    @property
+    def attribute_label(self) -> str | None:
+        """Display label built from this variant's attribute values, e.g.
+        "Ring Size 6, Ruby". None if the variant has no attribute values
+        (replaces the old, now-dropped `size` column for display purposes).
+        """
+        values = [
+            va.attribute_value.value
+            for va in self.attribute_values
+            if va.attribute_value and va.attribute_value.value
+        ]
+        return ", ".join(values) if values else None
