@@ -794,7 +794,7 @@ class AdminManagementRepository:
             db.query(Product)
             .options(
                 selectinload(Product.subcategory),
-                selectinload(Product.variants),
+                selectinload(Product.variants).selectinload(ProductVariant.attribute_values),
                 selectinload(Product.images),
                 selectinload(Product.collections),
                 selectinload(Product.tags),
