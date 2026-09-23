@@ -13,7 +13,7 @@ class Order(Base):
     __tablename__ = "orders"
     __table_args__ = (
         CheckConstraint(
-            "status IN ('PENDING', 'CONFIRMED', 'PROCESSING', 'SHIPPED', 'DELIVERED', 'CANCELLED')",
+            "status IN ('PENDING', 'CONFIRMED', 'PROCESSING', 'SHIPPED', 'DELIVERED', 'CANCELLED', 'COMPLETED')",
             name="chk_orders_status_allowed",
         ),
     )
@@ -22,8 +22,8 @@ class Order(Base):
     store_id = Column(UUID(as_uuid=True), ForeignKey("stores.id"), nullable=True, index=True)
     user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
 
-    email = Column(String(255), nullable=False)
-    full_name = Column(String(200), nullable=False)
+    email = Column(String(255), nullable=True)
+    full_name = Column(String(200), nullable=True)
     phone = Column(String(50), nullable=True)
     shipping_address = Column(JSONB, nullable=False, default=dict)
 
@@ -37,6 +37,8 @@ class Order(Base):
         index=True,
     )
     status = Column(String(20), nullable=False, default="PENDING", server_default="PENDING")
+    source = Column(String(20), nullable=False, default="website", server_default="website")
+    invoice_number = Column(String(50), unique=True, nullable=True)
     cancelled_at = Column(TIMESTAMP, nullable=True)
 
     # Post-purchase rating fields
@@ -50,7 +52,7 @@ class Order(Base):
     items = relationship("OrderItem", back_populates="order", cascade="all, delete-orphan")
     store = relationship("Store")
     user = relationship("User")
-    sale = relationship("Sale", back_populates="order", uselist=False)
+    sale = relationship("Sale", back_populates="order")
     post_purchase_triggers = relationship("PostPurchaseTrigger", back_populates="order")
 
     @property

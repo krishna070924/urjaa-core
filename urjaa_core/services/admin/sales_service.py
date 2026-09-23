@@ -7,7 +7,7 @@ from typing import Literal
 from uuid import UUID, uuid4
 
 from fastapi import HTTPException
-from sqlalchemy import func
+from sqlalchemy import func, text
 from sqlalchemy.orm import Session
 
 from urjaa_core.core.user_auth import (
@@ -16,6 +16,7 @@ from urjaa_core.core.user_auth import (
     hash_user_password,
     normalize_user_email,
 )
+from urjaa_core.models.order import Order
 from urjaa_core.models.sale import Sale
 from urjaa_core.models.store import Store
 from urjaa_core.models.user import User
@@ -92,6 +93,31 @@ class SalesService:
     @staticmethod
     def _build_invoice_number(sale_id: UUID, date_time: datetime) -> str:
         return f"INV-{date_time.strftime('%Y%m%d')}-{str(sale_id).split('-')[0].upper()}"
+
+    @staticmethod
+    def _generate_order_invoice_number(db: Session, store_id: UUID, date_time: datetime) -> str:
+        """Atomic, gapless-under-concurrency sequence per (store, month).
+
+        Postgres UPSERT (INSERT ... ON CONFLICT DO UPDATE) takes a row-level
+        lock for the duration of the statement, so concurrent callers for the
+        same (store_id, period) serialize on it instead of racing a
+        read-then-write. No app-level locking needed.
+        """
+        period = date_time.strftime("%Y%m")
+        seq = db.execute(
+            text(
+                """
+                INSERT INTO invoice_sequences (store_id, period, seq)
+                VALUES (:store_id, :period, 1)
+                ON CONFLICT (store_id, period)
+                DO UPDATE SET seq = invoice_sequences.seq + 1
+                RETURNING seq
+                """
+            ),
+            {"store_id": store_id, "period": period},
+        ).scalar_one()
+        store_code = str(store_id).replace("-", "")[:8].upper()
+        return f"INV-{store_code}-{period}-{seq}"
 
     @staticmethod
     def _to_sale_response(sale: Sale) -> dict:
@@ -510,6 +536,8 @@ class SalesService:
         total_profit = 0.0
         sale_time = payload.date_time or datetime.now(UTC)
 
+        order_id: UUID | None = None
+
         with SalesService._transaction_scope(db):
             customer = None
             if payload.customer_id is not None:
@@ -517,6 +545,7 @@ class SalesService:
                 if not customer:
                     raise HTTPException(status_code=404, detail="Selected customer was not found")
 
+            line_items: list[tuple[BulkSaleItemRequest, float, float]] = []
             for item in payload.items:
                 _, variant = SalesService._validate_sale_item(db, store_id=store_id, item=item)
 
@@ -532,7 +561,26 @@ class SalesService:
                     final_price=item.final_price,
                     item_weight=item.weight,
                 )
+                line_items.append((item, line_cost_price, line_profit))
+                total_amount += float(item.final_price)
+                total_cost_price += line_cost_price
+                total_profit += line_profit
 
+            order = Order(
+                store_id=store_id,
+                user_id=None,
+                email=None,
+                full_name=None,
+                total_amount=round(total_amount, 2),
+                status="COMPLETED",
+                source=source,
+                invoice_number=SalesService._generate_order_invoice_number(db, store_id, sale_time),
+            )
+            db.add(order)
+            db.flush()
+            order_id = order.id
+
+            for item, line_cost_price, line_profit in line_items:
                 sale = SalesService._build_sale_record(
                     store_id=store_id,
                     item=item,
@@ -541,15 +589,14 @@ class SalesService:
                     customer_id=payload.customer_id,
                     source=source,
                     date_time=sale_time,
+                    order_id=order_id,
                 )
                 SalesRepository.create_sale(db, sale)
                 created_sales.append(sale)
-                total_amount += float(item.final_price)
-                total_cost_price += line_cost_price
-                total_profit += line_profit
 
         return {
             "created_sale_ids": [sale.id for sale in created_sales],
+            "order_id": order_id,
             "total_amount": round(total_amount, 2),
             "total_cost_price": round(total_cost_price, 2),
             "total_profit": round(total_profit, 2),
