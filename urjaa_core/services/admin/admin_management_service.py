@@ -77,6 +77,28 @@ class AdminManagementService:
         "unisex": "Unisex",
     }
 
+    VARIANT_CONSTRAINT_MESSAGES = {
+        "chk_variant_weight_positive": (
+            "Weight must be greater than 0 if provided — leave it blank instead of 0"
+        ),
+        "chk_variant_making_non_negative": "Making charges cannot be negative",
+        "product_variants_stock_quantity_non_negative": "Stock quantity cannot be negative",
+        "product_variants_sku_code_key": "Variant SKU already exists",
+    }
+
+    @staticmethod
+    def _variant_integrity_error_detail(exc: IntegrityError) -> str:
+        constraint_name = getattr(getattr(exc.orig, "diag", None), "constraint_name", None)
+        if not constraint_name:
+            message = str(exc.orig)
+            constraint_name = next(
+                (name for name in AdminManagementService.VARIANT_CONSTRAINT_MESSAGES if name in message),
+                None,
+            )
+        return AdminManagementService.VARIANT_CONSTRAINT_MESSAGES.get(
+            constraint_name, "Invalid variant data — check numeric fields are valid"
+        )
+
     @staticmethod
     def _normalize_gender_key(value: str | None) -> str:
         normalized = (value or "").strip().lower()
@@ -1964,6 +1986,11 @@ class AdminManagementService:
             db.commit()
             db.refresh(created)
             return created
+        except IntegrityError as exc:
+            db.rollback()
+            raise HTTPException(
+                status_code=422, detail=AdminManagementService._variant_integrity_error_detail(exc)
+            )
         except Exception:
             db.rollback()
             raise
@@ -2034,6 +2061,11 @@ class AdminManagementService:
             db.commit()
             db.refresh(variant)
             return variant
+        except IntegrityError as exc:
+            db.rollback()
+            raise HTTPException(
+                status_code=422, detail=AdminManagementService._variant_integrity_error_detail(exc)
+            )
         except Exception:
             db.rollback()
             raise
