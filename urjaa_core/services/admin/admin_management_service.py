@@ -1799,14 +1799,15 @@ class AdminManagementService:
             next_name = payload.name.strip()
             if next_name != product.name:
                 product.name = next_name
-                product.slug = AdminManagementService._unique_slug(
-                    AdminManagementService._slugify(next_name),
-                    lambda candidate: (
-                        (existing := AdminManagementRepository.get_product_by_slug(db, candidate, store_id=store_id))
-                        is not None
-                        and existing.id != product.id
-                    ),
-                )
+                if product.status == "draft":
+                    product.slug = AdminManagementService._unique_slug(
+                        AdminManagementService._slugify(next_name),
+                        lambda candidate: (
+                            (existing := AdminManagementRepository.get_product_by_slug(db, candidate, store_id=store_id))
+                            is not None
+                            and existing.id != product.id
+                        ),
+                    )
 
         for field in ["description", "featured", "customizable", "status"]:
             value = getattr(payload, field)
