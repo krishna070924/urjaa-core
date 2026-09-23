@@ -64,6 +64,7 @@ class VariantCreateRequest(BaseModel):
     price_override: float | None = Field(default=None, ge=0)
     stock_quantity: int = Field(default=0, ge=0)
     sku_code: str = Field(min_length=1, max_length=100)
+    internal_notes: str | None = Field(default=None)
 
 
 class VariantUpdateRequest(BaseModel):
@@ -81,6 +82,7 @@ class VariantUpdateRequest(BaseModel):
     price_override: float | None = Field(default=None, ge=0)
     stock_quantity: int | None = Field(default=None, ge=0)
     sku_code: str | None = Field(default=None, min_length=1, max_length=100)
+    internal_notes: str | None = Field(default=None)
 
 
 class ImageCreateRequest(BaseModel):
@@ -426,6 +428,7 @@ class AdminVariantResponse(BaseModel):
     price_override: float | None = None
     stock_quantity: int
     sku_code: str | None
+    internal_notes: str | None = None
 
     class Config:
         orm_mode = True

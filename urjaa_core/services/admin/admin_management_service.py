@@ -1953,6 +1953,7 @@ class AdminManagementService:
             price_override=payload.price_override,
             stock_quantity=payload.stock_quantity,
             sku_code=payload.sku_code,
+            internal_notes=payload.internal_notes,
         )
 
         try:
@@ -2015,6 +2016,7 @@ class AdminManagementService:
             "price_override",
             "stock_quantity",
             "sku_code",
+            "internal_notes",
         ]:
             value = getattr(payload, field)
             if value is not None:

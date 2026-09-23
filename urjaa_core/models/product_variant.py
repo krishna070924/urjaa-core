@@ -4,6 +4,7 @@ from sqlalchemy import (
     Column,
     Integer,
     String,
+    Text,
     ForeignKey,
     DECIMAL
 )
@@ -40,6 +41,10 @@ class ProductVariant(Base):
     sku_code = Column(String(100), unique=True)
 
     status = Column(String(20), default="active")
+
+    # Staff-only: physical stock location notes (e.g. "box 4, shelf B").
+    # Never exposed via storefront-facing schemas.
+    internal_notes = Column(Text, nullable=True)
 
     product = relationship("Product", back_populates="variants")
     store = relationship("Store")
