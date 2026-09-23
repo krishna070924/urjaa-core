@@ -22,12 +22,15 @@ dependencies = [
     "openpyxl",
     "python-multipart",
     "email-validator",
+    "reportlab",
+    "python-barcode[images]",
 ]
 
 [project.optional-dependencies]
 dev = [
     "ruff",
     "pytest",
+    "zxing-cpp",
 ]
 
 [build-system]
