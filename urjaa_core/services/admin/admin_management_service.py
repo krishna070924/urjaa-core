@@ -1802,6 +1802,120 @@ class AdminManagementService:
             raise
 
     @staticmethod
+    def _duplicate_sku(seed_sku: str | None, existing_skus_lower: set[str]) -> str:
+        """Same `-COPY`, `-COPY-2`, ... pattern as VariantManager.tsx's
+        buildDuplicateSku, applied server-side for bulk product duplication."""
+        normalized_seed = (seed_sku or "").strip() or "VARIANT"
+        candidate = f"{normalized_seed}-COPY"
+        counter = 1
+        while candidate.lower() in existing_skus_lower:
+            counter += 1
+            candidate = f"{normalized_seed}-COPY-{counter}"
+        return candidate
+
+    @staticmethod
+    def duplicate_product(db: Session, store_id: UUID, product_id: UUID) -> Product:
+        source = AdminManagementRepository.get_product_with_relations(db, product_id, store_id=store_id)
+        if not source:
+            raise HTTPException(status_code=404, detail="Product not found")
+
+        name = f"{source.name} (Copy)"
+        slug = AdminManagementService._unique_slug(
+            AdminManagementService._slugify(name),
+            lambda candidate: AdminManagementRepository.get_product_by_slug_global(db, candidate) is not None,
+        )
+
+        clone = Product(
+            store_id=store_id,
+            name=name,
+            slug=slug,
+            description=source.description,
+            subcategory_id=source.subcategory_id,
+            status="draft",
+            featured=source.featured,
+            customizable=source.customizable,
+        )
+
+        try:
+            created = AdminManagementRepository.create_product(db, clone)
+
+            created.collections = list(source.collections)
+            created.tags = list(source.tags)
+
+            for attr in source.attributes:
+                db.add(ProductAttribute(product_id=created.id, attribute_value_id=attr.attribute_value_id))
+
+            for stone in source.stones:
+                db.add(
+                    ProductStone(
+                        product_id=created.id,
+                        stone_id=stone.stone_id,
+                        quantity=stone.quantity,
+                        total_carat_weight=stone.total_carat_weight,
+                    )
+                )
+
+            for image in source.images:
+                db.add(
+                    ProductImage(
+                        product_id=created.id,
+                        image_url=image.image_url,
+                        is_primary=image.is_primary,
+                        display_order=image.display_order,
+                    )
+                )
+
+            existing_skus_lower = {
+                sku.lower()
+                for (sku,) in db.query(ProductVariant.sku_code).filter(
+                    ProductVariant.store_id == store_id, ProductVariant.sku_code.isnot(None)
+                )
+            }
+
+            for variant in source.variants:
+                new_sku = AdminManagementService._duplicate_sku(variant.sku_code, existing_skus_lower)
+                existing_skus_lower.add(new_sku.lower())
+
+                new_variant = ProductVariant(
+                    store_id=store_id,
+                    product_id=created.id,
+                    base_metal_id=variant.base_metal_id,
+                    metal_color_id=variant.metal_color_id,
+                    metal_purity_id=variant.metal_purity_id,
+                    weight=variant.weight,
+                    metal_type=variant.metal_type,
+                    metal_weight_grams=variant.metal_weight_grams,
+                    stone_quantity=variant.stone_quantity,
+                    stone_cost=variant.stone_cost,
+                    making_charges=variant.making_charges,
+                    cost_price=variant.cost_price,
+                    price_override=variant.price_override,
+                    stock_quantity=0,
+                    sku_code=new_sku,
+                    status=variant.status,
+                    # internal_notes intentionally NOT cloned: it's a staff-only
+                    # physical stock-location note (e.g. "box 4, shelf B") for the
+                    # ORIGINAL batch. A clone starts as 0-stock/not-yet-received,
+                    # so the source note would be actively misleading if copied.
+                )
+                AdminManagementRepository.create_variant(db, new_variant)
+
+                for variant_attribute in variant.attribute_values:
+                    db.add(
+                        VariantAttribute(
+                            variant_id=new_variant.id,
+                            attribute_value_id=variant_attribute.attribute_value_id,
+                        )
+                    )
+
+            db.commit()
+            db.refresh(created)
+            return created
+        except Exception:
+            db.rollback()
+            raise
+
+    @staticmethod
     def update_product(db: Session, store_id: UUID, product_id: UUID, payload: ProductUpdateRequest) -> Product:
         product = AdminManagementRepository.get_product_by_id(db, product_id, store_id=store_id)
         if not product:
