@@ -2208,6 +2208,19 @@ class AdminManagementService:
             raise
 
     @staticmethod
+    def restock_variant(db: Session, store_id: UUID, variant_id: UUID, quantity: int) -> ProductVariant:
+        if quantity <= 0:
+            raise HTTPException(status_code=422, detail="Restock quantity must be positive")
+        variant = AdminManagementRepository.increment_variant_stock(
+            db, variant_id=variant_id, store_id=store_id, quantity=quantity
+        )
+        if not variant:
+            raise HTTPException(status_code=404, detail="Variant not found")
+        db.commit()
+        db.refresh(variant)
+        return variant
+
+    @staticmethod
     def delete_variant(db: Session, store_id: UUID, variant_id: UUID) -> None:
         variant = AdminManagementRepository.get_variant_by_id(db, variant_id, store_id=store_id)
         if not variant:
