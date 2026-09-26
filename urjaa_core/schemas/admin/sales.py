@@ -104,6 +104,7 @@ class SaleResponse(BaseModel):
 
 class BulkSaleResponse(BaseModel):
     created_sale_ids: list[UUID]
+    order_id: UUID | None = None
     total_amount: float
     total_cost_price: float
     total_profit: float
