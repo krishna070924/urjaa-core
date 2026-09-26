@@ -14,8 +14,11 @@ Run: `python tests/test_bulk_sale_order_grouping.py` (DATABASE_URL must
 already point at a migrated `urjaa` DB -- run `alembic upgrade head` first).
 """
 
+import base64
 import os
+import re
 import sys
+import zlib
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -270,9 +273,60 @@ def test_online_checkout_order_path_unaffected():
         db.close()
 
 
+def test_build_invoice_pdf_covers_all_order_lines():
+    """Task 02 self-check: a 3-item walk-in basket must produce ONE pdf
+    covering all 3 lines + a correct grand total, keyed by order_id (not
+    the old single-sale_id path).
+    """
+    db = SessionLocal()
+    sale_ids: list = []
+    order_ids: list = []
+    store = product = variants = base_metal = metal_rate = None
+    try:
+        store, product, variants = _build_fixtures(db)
+        base_metal = variants[0].base_metal
+        metal_rate = db.query(MetalRate).filter(MetalRate.base_metal_id == base_metal.id).first()
+
+        prices = [15000.00, 8000.00, 2500.00]
+        payload = BulkSaleCreateRequest(
+            items=[
+                BulkSaleItemRequest(product_id=product.id, variant_id=v.id, quantity=1, final_price=p)
+                for v, p in zip(variants, prices)
+            ]
+        )
+        result = SalesService.create_bulk_sale(db, store_id=store.id, payload=payload)
+        sale_ids.extend(result["created_sale_ids"])
+        order_ids.append(result["order_id"])
+
+        file_name, pdf_bytes = SalesService.build_invoice_pdf(db, store_id=store.id, order_id=result["order_id"])
+
+        order = db.query(Order).filter(Order.id == result["order_id"]).one()
+        assert pdf_bytes.startswith(b"%PDF"), "not a valid PDF"
+        assert order.invoice_number in file_name
+        assert file_name.endswith(".pdf")
+
+        # Every line's SKU must appear in the rendered (ASCII85+Flate-encoded) content stream.
+        content = b"".join(
+            zlib.decompress(base64.a85decode(raw.rstrip(b"\r\n").removesuffix(b"~>")))
+            for raw in re.findall(rb"stream\r?\n(.*?)endstream", pdf_bytes, re.DOTALL)
+        )
+        for v in variants:
+            assert v.sku_code.encode() in content, f"missing line for {v.sku_code}"
+
+        expected_total = round(sum(prices), 2)
+        assert round(float(order.total_amount), 2) == expected_total
+
+        print(f"OK: invoice {order.invoice_number} for order {order.id} covers all 3 lines, total={expected_total}")
+    finally:
+        if store is not None:
+            _cleanup(db, store, product, variants, base_metal, metal_rate, sale_ids, order_ids)
+        db.close()
+
+
 if __name__ == "__main__":
     test_bulk_sale_groups_into_one_order()
     test_invoice_number_sequence_is_race_free()
     test_invoice_sequence_upsert_is_atomic_under_raw_concurrency()
     test_online_checkout_order_path_unaffected()
+    test_build_invoice_pdf_covers_all_order_lines()
     print("All self-checks passed.")

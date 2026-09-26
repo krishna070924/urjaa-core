@@ -704,10 +704,22 @@ class SalesService:
         return file_name, data
 
     @staticmethod
-    def build_invoice_pdf(db: Session, store_id: UUID, sale_id: UUID) -> tuple[str, bytes]:
-        sale = SalesRepository.get_sale_by_id(db, sale_id, store_id=store_id)
-        if not sale:
-            raise HTTPException(status_code=404, detail="Sale record not found")
+    def get_order_invoice_number(db: Session, store_id: UUID, order_id: UUID) -> str:
+        order = SalesRepository.get_order_by_id(db, order_id, store_id=store_id)
+        if not order:
+            raise HTTPException(status_code=404, detail="Order not found")
+        if order.invoice_number:
+            return order.invoice_number
+        if order.sale:
+            first_sale = min(order.sale, key=lambda s: s.date_time)
+            return SalesService._build_invoice_number(first_sale.id, first_sale.date_time)
+        return SalesService._build_invoice_number(order.id, order.created_at)
+
+    @staticmethod
+    def build_invoice_pdf(db: Session, store_id: UUID, order_id: UUID) -> tuple[str, bytes]:
+        order = SalesRepository.get_order_by_id(db, order_id, store_id=store_id)
+        if not order or not order.sale:
+            raise HTTPException(status_code=404, detail="Order not found")
 
         try:
             from reportlab.lib.pagesizes import A4
@@ -718,7 +730,11 @@ class SalesService:
                 detail="Invoice generation is currently unavailable. Please contact support.",
             )
 
-        invoice_number = SalesService._build_invoice_number(sale.id, sale.date_time)
+        sales = sorted(order.sale, key=lambda s: s.date_time)
+        first_sale = sales[0]
+        invoice_number = order.invoice_number or SalesService._build_invoice_number(first_sale.id, first_sale.date_time)
+        customer = next((s.customer for s in sales if s.customer), None)
+
         buffer = BytesIO()
         pdf = canvas.Canvas(buffer, pagesize=A4)
         width, height = A4
@@ -730,34 +746,38 @@ class SalesService:
         pdf.setFont("Helvetica", 11)
         pdf.drawString(40, y, f"Invoice Number: {invoice_number}")
         y -= 16
-        pdf.drawString(40, y, f"Invoice Date: {sale.date_time.strftime('%d %b %Y %H:%M')}")
+        pdf.drawString(40, y, f"Invoice Date: {first_sale.date_time.strftime('%d %b %Y %H:%M')}")
 
         y -= 30
         pdf.setFont("Helvetica-Bold", 12)
         pdf.drawString(40, y, "Customer")
         y -= 18
         pdf.setFont("Helvetica", 11)
-        pdf.drawString(40, y, f"Name: {sale.customer.full_name if sale.customer else 'Walk-in Customer'}")
+        pdf.drawString(40, y, f"Name: {customer.full_name if customer else 'Walk-in Customer'}")
         y -= 16
-        pdf.drawString(40, y, f"Phone: {(sale.customer.phone if sale.customer else '') or '-'}")
+        pdf.drawString(40, y, f"Phone: {(customer.phone if customer else '') or '-'}")
 
         y -= 28
         pdf.setFont("Helvetica-Bold", 12)
-        pdf.drawString(40, y, "Sale Item")
+        pdf.drawString(40, y, "Sale Items")
         y -= 18
         pdf.setFont("Helvetica", 11)
-        pdf.drawString(40, y, f"Product: {sale.product.name if sale.product else 'Unknown Product'}")
-        y -= 16
-        pdf.drawString(40, y, f"SKU: {(sale.variant.sku_code if sale.variant else None) or '-'}")
-        y -= 16
-        pdf.drawString(40, y, f"Quantity: {sale.quantity}")
+        grand_total = 0.0
+        for sale in sales:
+            product_name = sale.product.name if sale.product else "Unknown Product"
+            sku_code = (sale.variant.sku_code if sale.variant else None) or "-"
+            line_total = float(sale.final_price)
+            grand_total += line_total
+            pdf.drawString(
+                40,
+                y,
+                f"{product_name} (SKU: {sku_code}) x{sale.quantity} - INR {line_total:,.2f}",
+            )
+            y -= 16
 
-        y -= 28
+        y -= 12
         pdf.setFont("Helvetica-Bold", 12)
-        pdf.drawString(40, y, "Pricing")
-        y -= 18
-        pdf.setFont("Helvetica", 11)
-        pdf.drawString(40, y, f"Total Amount: INR {float(sale.total_amount or sale.final_price):,.2f}")
+        pdf.drawString(40, y, f"Grand Total: INR {grand_total:,.2f}")
 
         pdf.showPage()
         pdf.save()
