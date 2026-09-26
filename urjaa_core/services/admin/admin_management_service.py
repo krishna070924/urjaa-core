@@ -2113,6 +2113,7 @@ class AdminManagementService:
             stock_quantity=payload.stock_quantity,
             sku_code=payload.sku_code,
             internal_notes=payload.internal_notes,
+            huid_number=payload.huid_number,
         )
 
         try:
@@ -2181,6 +2182,7 @@ class AdminManagementService:
             "stock_quantity",
             "sku_code",
             "internal_notes",
+            "huid_number",
         ]:
             value = getattr(payload, field)
             if value is not None:

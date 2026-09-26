@@ -46,6 +46,9 @@ class ProductVariant(Base):
     # Never exposed via storefront-facing schemas.
     internal_notes = Column(Text, nullable=True)
 
+    # BIS hallmark ID; optional, one per variant (see ticket for per-piece caveat).
+    huid_number = Column(String(50), nullable=True)
+
     product = relationship("Product", back_populates="variants")
     store = relationship("Store")
 
