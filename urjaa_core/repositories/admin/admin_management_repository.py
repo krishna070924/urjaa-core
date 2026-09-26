@@ -867,6 +867,25 @@ class AdminManagementRepository:
         )
 
     @staticmethod
+    def increment_variant_stock(db: Session, variant_id: UUID, store_id: UUID, quantity: int) -> ProductVariant | None:
+        """Atomic single-column increment: UPDATE ... SET stock_quantity = stock_quantity + :qty.
+        Avoids the read-modify-write lost-update race a Python +=  would have under
+        concurrent restocks (same class of bug as H9's order_service fix)."""
+        updated = (
+            db.query(ProductVariant)
+            .filter(ProductVariant.id == variant_id, ProductVariant.store_id == store_id)
+            .update({ProductVariant.stock_quantity: ProductVariant.stock_quantity + quantity}, synchronize_session=False)
+        )
+        if not updated:
+            return None
+        db.flush()
+        return (
+            db.query(ProductVariant)
+            .filter(ProductVariant.id == variant_id, ProductVariant.store_id == store_id)
+            .first()
+        )
+
+    @staticmethod
     def create_variant(db: Session, variant: ProductVariant) -> ProductVariant:
         db.add(variant)
         db.flush()
