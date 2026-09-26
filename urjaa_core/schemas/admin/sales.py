@@ -151,6 +151,6 @@ class CustomerArchiveResponse(BaseModel):
 
 
 class SaleInvoiceResponse(BaseModel):
-    sale_id: UUID
+    order_id: UUID
     invoice_number: str
     generated_at: datetime

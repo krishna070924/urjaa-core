@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from urjaa_core.models.base_metal import BaseMetal
 from urjaa_core.models.metal_rate import MetalRate
+from urjaa_core.models.order import Order
 from urjaa_core.models.product import Product
 from urjaa_core.models.product_variant import ProductVariant
 from urjaa_core.models.sale import Sale
@@ -226,6 +227,19 @@ class SalesRepository:
                 selectinload(Sale.customer),
             )
             .filter(Sale.id == sale_id, Sale.store_id == store_id)
+            .first()
+        )
+
+    @staticmethod
+    def get_order_by_id(db: Session, order_id: UUID, store_id: UUID) -> Order | None:
+        return (
+            db.query(Order)
+            .options(
+                selectinload(Order.sale).selectinload(Sale.product),
+                selectinload(Order.sale).selectinload(Sale.variant),
+                selectinload(Order.sale).selectinload(Sale.customer),
+            )
+            .filter(Order.id == order_id, Order.store_id == store_id)
             .first()
         )
 
