@@ -65,6 +65,7 @@ class VariantCreateRequest(BaseModel):
     stock_quantity: int = Field(default=0, ge=0)
     sku_code: str = Field(min_length=1, max_length=100)
     internal_notes: str | None = Field(default=None)
+    huid_number: str | None = Field(default=None, max_length=50)
 
 
 class VariantUpdateRequest(BaseModel):
@@ -83,6 +84,7 @@ class VariantUpdateRequest(BaseModel):
     stock_quantity: int | None = Field(default=None, ge=0)
     sku_code: str | None = Field(default=None, min_length=1, max_length=100)
     internal_notes: str | None = Field(default=None)
+    huid_number: str | None = Field(default=None, max_length=50)
 
 
 class ImageCreateRequest(BaseModel):
@@ -435,6 +437,7 @@ class AdminVariantResponse(BaseModel):
     stock_quantity: int
     sku_code: str | None
     internal_notes: str | None = None
+    huid_number: str | None = None
 
     class Config:
         orm_mode = True
