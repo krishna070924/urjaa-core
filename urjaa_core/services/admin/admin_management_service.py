@@ -46,6 +46,7 @@ from urjaa_core.schemas.admin.management import (
     MetalPurityCreateRequest,
     MetalPurityUpdateRequest,
     MetalRateBulkUpdateRequest,
+    MetalRateCreateRequest,
     MetalTypeCreateRequest,
     MetalTypeUpdateRequest,
     ProductCreateRequest,
@@ -1563,6 +1564,28 @@ class AdminManagementService:
         except IntegrityError:
             db.rollback()
             raise HTTPException(status_code=409, detail="Attribute value is in use and cannot be deleted")
+        except Exception:
+            db.rollback()
+            raise
+
+    @staticmethod
+    def create_metal_rate(db: Session, payload: MetalRateCreateRequest) -> MetalRate:
+        metal_type = AdminManagementRepository.get_metal_type_by_id(db, payload.base_metal_id)
+        if not metal_type:
+            raise HTTPException(status_code=404, detail="Metal type not found")
+
+        metal_rate = MetalRate(
+            base_metal_id=payload.base_metal_id,
+            rate_per_gram=payload.rate_per_gram,
+            effective_from=payload.effective_from,
+        )
+        try:
+            created = AdminManagementRepository.create_metal_rate(db, metal_rate)
+            db.commit()
+            return created
+        except IntegrityError:
+            db.rollback()
+            raise HTTPException(status_code=409, detail="A metal rate for this metal type and effective date already exists")
         except Exception:
             db.rollback()
             raise
