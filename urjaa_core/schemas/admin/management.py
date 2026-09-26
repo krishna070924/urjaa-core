@@ -186,6 +186,12 @@ class AttributeValueUpdateRequest(BaseModel):
     value: str | None = Field(default=None, min_length=1, max_length=100)
 
 
+class MetalRateCreateRequest(BaseModel):
+    base_metal_id: int = Field(gt=0)
+    rate_per_gram: float = Field(gt=0)
+    effective_from: datetime
+
+
 class MetalRateUpdateItem(BaseModel):
     id: int = Field(gt=0)
     rate_per_gram: float = Field(ge=0)

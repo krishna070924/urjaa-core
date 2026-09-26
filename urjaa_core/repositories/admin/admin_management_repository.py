@@ -533,6 +533,13 @@ class AdminManagementRepository:
         db.delete(metal_color)
 
     @staticmethod
+    def create_metal_rate(db: Session, metal_rate: MetalRate) -> MetalRate:
+        db.add(metal_rate)
+        db.flush()
+        db.refresh(metal_rate)
+        return metal_rate
+
+    @staticmethod
     def get_metal_rates(db: Session) -> list[MetalRate]:
         return (
             db.query(MetalRate)
