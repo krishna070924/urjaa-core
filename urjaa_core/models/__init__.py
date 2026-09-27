@@ -31,6 +31,7 @@ from .store_location import StoreLocation
 from .website_config import WebsiteConfig
 from .wishlist import Wishlist
 from .commission_request import CommissionRequest
+from .appointment import Appointment
 from .legal_page import LegalPage
 from .product_review import ProductReview
 from .contact_submission import ContactSubmission
