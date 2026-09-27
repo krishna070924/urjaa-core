@@ -244,6 +244,98 @@ class EmailService:
         )
 
     @staticmethod
+    def _send_appointment_status_email(
+        *,
+        to_email: str,
+        full_name: str,
+        heading: str,
+        appointment_type: str,
+        showroom: str,
+        appointment_date: str,
+        appointment_time: str,
+        reference: str,
+        manage_link: str,
+    ) -> bool:
+        display_name = full_name.strip() or "there"
+        subject = f"{heading}: {appointment_type} at {showroom}"
+        text_body = (
+            f"Hello {display_name},\n\n"
+            f"{heading}.\n\n"
+            f"Service: {appointment_type}\n"
+            f"Showroom: {showroom}\n"
+            f"Date: {appointment_date}\n"
+            f"Time: {appointment_time}\n"
+            f"Booking reference: {reference}\n\n"
+            f"Manage this appointment: {manage_link}\n"
+        )
+        html_body = (
+            f"<p>Hello {display_name},</p>"
+            f"<p>{heading}.</p>"
+            "<ul>"
+            f"<li><strong>Service:</strong> {appointment_type}</li>"
+            f"<li><strong>Showroom:</strong> {showroom}</li>"
+            f"<li><strong>Date:</strong> {appointment_date}</li>"
+            f"<li><strong>Time:</strong> {appointment_time}</li>"
+            f"<li><strong>Booking reference:</strong> {reference}</li>"
+            "</ul>"
+            f"<p><a href=\"{manage_link}\">Manage this appointment</a></p>"
+        )
+        return EmailService.send_email(
+            to_email=to_email,
+            subject=subject,
+            html_body=html_body,
+            text_body=text_body,
+        )
+
+    @staticmethod
+    def send_appointment_confirmation_email(
+        *,
+        to_email: str,
+        full_name: str,
+        appointment_type: str,
+        showroom: str,
+        appointment_date: str,
+        appointment_time: str,
+        reference: str,
+        manage_link: str,
+    ) -> bool:
+        return EmailService._send_appointment_status_email(
+            to_email=to_email,
+            full_name=full_name,
+            heading="Your appointment is confirmed",
+            appointment_type=appointment_type,
+            showroom=showroom,
+            appointment_date=appointment_date,
+            appointment_time=appointment_time,
+            reference=reference,
+            manage_link=manage_link,
+        )
+
+    @staticmethod
+    def send_appointment_reschedule_email(
+        *,
+        to_email: str,
+        full_name: str,
+        appointment_type: str,
+        showroom: str,
+        appointment_date: str,
+        appointment_time: str,
+        reference: str,
+        manage_link: str,
+    ) -> bool:
+        return EmailService._send_appointment_status_email(
+            to_email=to_email,
+            full_name=full_name,
+            heading="Your appointment has been rescheduled",
+            appointment_type=appointment_type,
+            showroom=showroom,
+            appointment_date=appointment_date,
+            appointment_time=appointment_time,
+            reference=reference,
+            manage_link=manage_link,
+        )
+
+    @staticmethod
     def send_rating_request_email(
         to_email: str,
         user_name: str,
