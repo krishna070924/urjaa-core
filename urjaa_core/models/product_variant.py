@@ -70,3 +70,15 @@ class ProductVariant(Base):
             if va.attribute_value and va.attribute_value.value
         ]
         return ", ".join(values) if values else None
+
+    @property
+    def base_metal_name(self) -> str | None:
+        return self.base_metal.name if self.base_metal else None
+
+    @property
+    def metal_color_name(self) -> str | None:
+        return self.metal_color.name if self.metal_color else None
+
+    @property
+    def metal_purity_label(self) -> str | None:
+        return self.metal_purity.purity_label if self.metal_purity else None
