@@ -63,6 +63,14 @@ class StoneResponse(BaseModel):
     name: str | None
     quantity: int | None
     total_carat_weight: float | None
+    # B-02: hand-entered certification (D13), all nullable (D3) — GIA/IGI
+    # block the PDP renders when a stone has one, omitted/null otherwise.
+    cut: str | None = None
+    clarity: str | None = None
+    color: str | None = None
+    origin: str | None = None
+    certificate_number: str | None = None
+    certification_agency: str | None = None
 
     class Config:
         orm_mode = True
