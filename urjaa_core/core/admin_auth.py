@@ -409,6 +409,14 @@ ADMIN_ROUTE_PERMISSION_RULES: list[dict[str, Any]] = [
         "methods": None,
         "any_of": {ADMIN_PERMISSION_MANAGE_CUSTOMERS},
     },
+    # Showroom appointments (F-02). This table is fail-closed: a route absent
+    # from it 403s for every admin regardless of their permissions, so adding
+    # routes here is not optional. Same omission as the 2026-09-18 batch above.
+    {
+        "pattern": re.compile(r"^/admin/appointments(?:/.*)?$"),
+        "methods": None,
+        "any_of": {ADMIN_PERMISSION_MANAGE_CUSTOMERS},
+    },
     {
         "pattern": re.compile(r"^/admin/commission-requests(?:/.*)?$"),
         "methods": {"GET"},
