@@ -19,3 +19,8 @@ class ProductStone(Base):
 
     product = relationship("Product", back_populates="stones")
     stone = relationship("Stone", back_populates="products")
+
+    @property
+    def name(self) -> str | None:
+        """Stone name for storefront display (from the related Stone)."""
+        return self.stone.name if self.stone else None

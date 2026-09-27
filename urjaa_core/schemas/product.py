@@ -40,10 +40,29 @@ class PaginatedProducts(BaseModel):
 class VariantResponse(BaseModel):
 
     id: UUID
-    size: str | None
+    attribute_label: str | None
+    base_metal_name: str | None
+    metal_color_name: str | None
+    metal_purity_label: str | None
     metal_weight_grams: float | None
+    weight: float | None
+    huid_number: str | None
     stock_quantity: int
     sku_code: str
+    # Computed per-variant price (PricingService), product-detail only. `None`
+    # means unpriceable (missing metal rate) — storefront shows "Price on
+    # Request"; never substitute 0.
+    price: float | None = None
+    formatted_price: str = ""
+
+    class Config:
+        orm_mode = True
+
+
+class StoneResponse(BaseModel):
+    name: str | None
+    quantity: int | None
+    total_carat_weight: float | None
 
     class Config:
         orm_mode = True
@@ -56,6 +75,7 @@ class ProductDetailResponse(ProductBase):
     formatted_price: str = ""
 
     variants: list[VariantResponse]
+    stones: list[StoneResponse] = []
     images: list[ProductImageSchema] = []   # 👈 ADD THIS
 
     class Config:

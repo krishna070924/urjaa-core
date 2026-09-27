@@ -2,6 +2,8 @@ from sqlalchemy.orm import Session, selectinload
 from sqlalchemy import case
 from uuid import UUID
 from urjaa_core.models.product import Product
+from urjaa_core.models.product_variant import ProductVariant
+from urjaa_core.models.product_stone import ProductStone
 from urjaa_core.repositories.catalog_query_builder import CatalogQueryBuilder
 
 
@@ -130,12 +132,14 @@ class ProductRepository:
             db.query(Product)
             .options(
                 selectinload(Product.subcategory),
-                selectinload(Product.variants),
-                selectinload(Product.stones),
+                selectinload(Product.variants).selectinload(ProductVariant.base_metal),
+                selectinload(Product.variants).selectinload(ProductVariant.metal_color),
+                selectinload(Product.variants).selectinload(ProductVariant.metal_purity),
+                selectinload(Product.stones).selectinload(ProductStone.stone),
                 selectinload(Product.attributes),
                 selectinload(Product.collections),
                 selectinload(Product.tags),
-                selectinload(Product.images),   
+                selectinload(Product.images),
             )
             .filter(
                 Product.slug == slug,

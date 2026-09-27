@@ -112,10 +112,21 @@ class ProductService:
         product = ProductRepository.get_product_by_slug(db, store_id=store_id, slug=slug)
 
         if product:
+            # Shared across starting_price + every variant below so pricing N
+            # variants of the same metal hits the metal-rate cache once, not N times.
+            rate_cache: dict = {}
+
             product.starting_price = PricingService.calculate_product_starting_price(
                 product,
-                db
+                db,
+                rate_cache=rate_cache,
             )
             product.formatted_price = format_price_or_request(product.starting_price)
+
+            for variant in product.variants:
+                variant.price = PricingService.calculate_variant_price(
+                    variant, db, rate_cache=rate_cache
+                )
+                variant.formatted_price = format_price_or_request(variant.price)
 
         return product
