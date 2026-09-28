@@ -17,5 +17,12 @@ class Subcategory(Base):
 
     default_variant_type_id = Column(Integer, ForeignKey("variant_types.id"), nullable=True)
 
+    # D21: what this category's single variation dimension is called, and in
+    # what unit — e.g. ("Length", "inches"), ("Ring Size", "US"),
+    # ("Diameter", "mm"). Both null means this category does not vary by size,
+    # and the admin hides the field entirely rather than showing an empty box.
+    size_label = Column(String(50), nullable=True)
+    size_unit = Column(String(20), nullable=True)
+
     category = relationship("Category")
     default_variant_type = relationship("VariantType")
