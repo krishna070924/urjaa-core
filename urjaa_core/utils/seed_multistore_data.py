@@ -157,7 +157,13 @@ def _seed_store_data(store: Store, store_code: str, lookups: dict[str, str]) -> 
                 db.add(product)
                 db.flush()
 
-            for index, (size, base_metal_id, metal_color_id, metal_purity_id, weight, stock) in enumerate(template["variants"], start=1):
+            # `size` is retained in the template tuples for readability but is NOT
+            # a column any more — ProductVariant.size was dropped and replaced by
+            # the derived `attribute_label` property, which reads VariantAttribute
+            # rows. Passing it to the constructor raised TypeError, so this seeder
+            # could not run at all. Seeded variants therefore have a null
+            # attribute_label until VariantAttribute rows are created for them.
+            for index, (_size_label, base_metal_id, metal_color_id, metal_purity_id, weight, stock) in enumerate(template["variants"], start=1):
                 sku_code = f"{store_code.upper()}-{template['slug'].split('-')[1].upper()}-{index:02d}"
                 variant = db.query(ProductVariant).filter(ProductVariant.sku_code == sku_code).first()
                 if not variant:
@@ -165,7 +171,6 @@ def _seed_store_data(store: Store, store_code: str, lookups: dict[str, str]) -> 
                         id=uuid.uuid4(),
                         store_id=store.id,
                         product_id=product.id,
-                        size=size,
                         base_metal_id=base_metal_id,
                         metal_color_id=metal_color_id,
                         metal_purity_id=metal_purity_id,
