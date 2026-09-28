@@ -49,6 +49,15 @@ class ProductVariant(Base):
     # BIS hallmark ID; optional, one per variant (see ticket for per-piece caveat).
     huid_number = Column(String(50), nullable=True)
 
+    # D21: the single variation dimension. Text, not numeric — ring sizes,
+    # lengths in inches and diameters in mm are not one number type. What this
+    # value is CALLED lives on the subcategory (size_label / size_unit).
+    size_value = Column(String(50), nullable=True)
+
+    # Escape hatch for one-off descriptors. Display-only, never filtered on.
+    # Deliberately not a second attribute system.
+    spec_note = Column(String(200), nullable=True)
+
     product = relationship("Product", back_populates="variants")
     store = relationship("Store")
 
@@ -60,25 +69,24 @@ class ProductVariant(Base):
 
     @property
     def attribute_label(self) -> str | None:
-        """Display label built from this variant's attribute values, e.g.
-        "Ring Size 6, Ruby". None if the variant has no attribute values
-        (replaces the old, now-dropped `size` column for display purposes).
+        """Display label for this variant's variation, e.g. "Ring Size 6" or
+        "Length 18 inches".
+
+        Derived from `size_value` plus the owning subcategory's `size_label`
+        and `size_unit` (decision D21). Falls back to the bare value when the
+        subcategory has no label configured, and returns None when the variant
+        has no size at all.
+
+        The API field name stays `attribute_label` so storefront clients do not
+        break; only what feeds it changed.
         """
-        values = [
-            va.attribute_value.value
-            for va in self.attribute_values
-            if va.attribute_value and va.attribute_value.value
-        ]
-        return ", ".join(values) if values else None
+        value = (self.size_value or "").strip()
+        if not value:
+            return None
 
-    @property
-    def base_metal_name(self) -> str | None:
-        return self.base_metal.name if self.base_metal else None
+        subcategory = getattr(getattr(self, "product", None), "subcategory", None)
+        label = (getattr(subcategory, "size_label", None) or "").strip()
+        unit = (getattr(subcategory, "size_unit", None) or "").strip()
 
-    @property
-    def metal_color_name(self) -> str | None:
-        return self.metal_color.name if self.metal_color else None
-
-    @property
-    def metal_purity_label(self) -> str | None:
-        return self.metal_purity.purity_label if self.metal_purity else None
+        parts = [part for part in (label, value, unit) if part]
+        return " ".join(parts)
