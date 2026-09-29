@@ -10,6 +10,7 @@ from .metal_type import MetalType
 from .base_metal import BaseMetal
 from .metal_color import MetalColor
 from .metal_purity import MetalPurity
+from .metal import Metal
 from .metal_rate import MetalRate
 
 from .stone import Stone

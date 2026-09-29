@@ -24,6 +24,11 @@ class ProductVariant(Base):
 
     product_id = Column(UUID(as_uuid=True), ForeignKey("products.id"), index=True)
 
+    # D25: the ONE reference that matters — a valid base-metal/colour/purity
+    # combination. The three columns below are legacy and kept only until every
+    # reader is migrated; they are not dropped in this change.
+    metal_id = Column(Integer, ForeignKey("metals.id"), nullable=True)
+
     base_metal_id = Column(Integer, ForeignKey("base_metals.id"))
     metal_color_id = Column(Integer, ForeignKey("metal_colors.id"))
     metal_purity_id = Column(Integer, ForeignKey("metal_purities.id"))
@@ -61,6 +66,8 @@ class ProductVariant(Base):
     product = relationship("Product", back_populates="variants")
     store = relationship("Store")
 
+    metal = relationship("Metal")
+
     base_metal = relationship("BaseMetal")
     metal_color = relationship("MetalColor")
     metal_purity = relationship("MetalPurity")
@@ -91,14 +98,26 @@ class ProductVariant(Base):
         parts = [part for part in (label, value, unit) if part]
         return " ".join(parts)
 
+    # These three feed the storefront's metal swatches. They resolve through
+    # the combination first and fall back to the legacy columns, so variants
+    # not yet migrated keep returning exactly what they returned before.
     @property
     def base_metal_name(self) -> str | None:
+        metal = self.metal
+        if metal is not None and metal.base_metal is not None:
+            return metal.base_metal.name
         return self.base_metal.name if self.base_metal else None
 
     @property
     def metal_color_name(self) -> str | None:
+        metal = self.metal
+        if metal is not None and metal.metal_color is not None:
+            return metal.metal_color.name
         return self.metal_color.name if self.metal_color else None
 
     @property
     def metal_purity_label(self) -> str | None:
+        metal = self.metal
+        if metal is not None and metal.metal_purity is not None:
+            return metal.metal_purity.purity_label
         return self.metal_purity.purity_label if self.metal_purity else None
