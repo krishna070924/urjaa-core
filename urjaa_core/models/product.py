@@ -30,6 +30,20 @@ class Product(Base):
         default="draft",
     )
 
+    # Who the piece is for. Previously stranded in the EAV product_attributes
+    # tables that H-06 deletes.
+    gender_id = Column(Integer, ForeignKey("genders.id"), nullable=True)
+
+    # Lookup-backed status. The `status` enum above is kept in sync for now and
+    # removed once every reader uses status_id.
+    status_id = Column(Integer, ForeignKey("product_statuses.id"), nullable=True)
+
+    # Soft delete. Separate from `status` and from is_visible_on_website:
+    # `archived` used to mean both "deleted" and "not shown", which made
+    # "list deleted products" and "restore this" ambiguous. A timestamp also
+    # records WHEN, which an enum cannot.
+    deleted_at = Column(TIMESTAMP, nullable=True)
+
     featured = Column(Boolean, default=False)
 
     customizable = Column(Boolean, default=False)
@@ -41,6 +55,8 @@ class Product(Base):
     updated_at = Column(TIMESTAMP, server_default=func.now(), onupdate=func.now())
 
     subcategory = relationship("Subcategory")
+    gender = relationship("Gender")
+    product_status = relationship("ProductStatus")
     store = relationship("Store")
 
     variants = relationship("ProductVariant", back_populates="product")

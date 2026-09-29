@@ -11,6 +11,8 @@ from .base_metal import BaseMetal
 from .metal_color import MetalColor
 from .metal_purity import MetalPurity
 from .metal import Metal
+from .gender import Gender
+from .product_status import ProductStatus
 from .metal_rate import MetalRate
 
 from .stone import Stone
