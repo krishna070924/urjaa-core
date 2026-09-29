@@ -35,9 +35,15 @@ class Metal(Base):
 
     base_metal_id = Column(Integer, ForeignKey("base_metals.id"), nullable=False)
 
-    # Nullable: silver and platinum have no colour variants.
-    metal_color_id = Column(Integer, ForeignKey("metal_colors.id"), nullable=True)
-    metal_purity_id = Column(Integer, ForeignKey("metal_purities.id"), nullable=True)
+    # NOT NULL, and not merely for tidiness: Postgres treats NULL as distinct
+    # from NULL, so the UNIQUE constraint below stops preventing duplicates the
+    # moment either column is nullable. A combination must be complete or the
+    # guarantee this table exists to provide is silently switched off.
+    #
+    # Silver and platinum get a colour row of their own ("Silver", "Natural")
+    # rather than a null — every metal has a colour, even when there is one.
+    metal_color_id = Column(Integer, ForeignKey("metal_colors.id"), nullable=False)
+    metal_purity_id = Column(Integer, ForeignKey("metal_purities.id"), nullable=False)
 
     # Generated ("22K Yellow Gold") but editable — a jeweller may have house
     # terminology.
