@@ -2063,6 +2063,33 @@ class AdminManagementService:
         return values
 
     @staticmethod
+    def _validate_metal_colour_pairing(metal_color, base_metal_id) -> None:
+        """Reject a colour that does not belong to the chosen base metal (D23).
+
+        Gold comes in yellow, white and rose; silver does not come in rose.
+        Enforced server-side, not merely hidden in the admin dropdown — the
+        dev database already contained a variant saved as Gold / Silver.
+
+        A colour whose own base_metal_id is NULL is not yet classified (see
+        migration 0019, which leaves such rows unmapped rather than guessing).
+        Those are allowed through so existing data keeps working; tightening
+        that is a follow-up once staff have corrected it.
+        """
+        if metal_color is None or base_metal_id is None:
+            return
+        colour_metal = getattr(metal_color, "base_metal_id", None)
+        if colour_metal is None:
+            return
+        if colour_metal != base_metal_id:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Metal colour {metal_color.name!r} does not belong to the "
+                    f"selected metal."
+                ),
+            )
+
+    @staticmethod
     def create_variant(
         db: Session,
         store_id: UUID,
@@ -2091,6 +2118,7 @@ class AdminManagementService:
             metal_color = AdminManagementRepository.get_metal_color_by_id(db, payload.metal_color_id)
             if not metal_color:
                 raise HTTPException(status_code=404, detail="Metal color not found")
+            AdminManagementService._validate_metal_colour_pairing(metal_color, payload.base_metal_id)
         if payload.metal_purity_id is not None:
             metal_purity = AdminManagementRepository.get_metal_purity_by_id(db, payload.metal_purity_id)
             if not metal_purity:
@@ -2158,6 +2186,13 @@ class AdminManagementService:
             metal_color = AdminManagementRepository.get_metal_color_by_id(db, payload.metal_color_id)
             if not metal_color:
                 raise HTTPException(status_code=404, detail="Metal color not found")
+            # Compare against the metal this update RESULTS in, not just the
+            # one it carries — changing only the colour must still be checked
+            # against the variant's existing metal.
+            effective_base_metal_id = (
+                payload.base_metal_id if payload.base_metal_id is not None else variant.base_metal_id
+            )
+            AdminManagementService._validate_metal_colour_pairing(metal_color, effective_base_metal_id)
         if payload.metal_purity_id is not None:
             metal_purity = AdminManagementRepository.get_metal_purity_by_id(db, payload.metal_purity_id)
             if not metal_purity:
