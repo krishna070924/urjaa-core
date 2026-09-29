@@ -101,7 +101,15 @@ class PricingService:
         if override is not None:
             return max(round_money(Decimal(override)), Decimal("0"))
 
-        base_metal_id = variant.base_metal_id
+        # D25: resolve through the metal combination when the variant has been
+        # migrated, falling back to the legacy column otherwise. Rates stay
+        # keyed on base metal — colour has no effect on price.
+        metal = getattr(variant, "metal", None)
+        base_metal_id = (
+            metal.base_metal_id
+            if metal is not None and metal.base_metal_id is not None
+            else variant.base_metal_id
+        )
 
         # The per-request rate_cache may legitimately cache a None (no rate), so we
         # test membership rather than truthiness to avoid re-querying every item.
@@ -119,11 +127,22 @@ class PricingService:
         rate = Decimal(metal_rate)
 
         purity_factor = Decimal("1")
-        purity = getattr(variant, "metal_purity", None)
+        # Same resolution order for purity: the combination first, then the
+        # variant's own legacy relationship.
+        purity = getattr(metal, "metal_purity", None) if metal is not None else None
+        if purity is None:
+            purity = getattr(variant, "metal_purity", None)
         if purity is not None and getattr(purity, "numeric_purity", None) is not None:
             purity_factor = Decimal(purity.numeric_purity) / Decimal("100")
-        elif getattr(variant, "metal_purity_id", None):
-            purity_row = db.query(MetalPurity).filter(MetalPurity.id == variant.metal_purity_id).first()
+        else:
+            purity_id = (
+                getattr(metal, "metal_purity_id", None) if metal is not None else None
+            ) or getattr(variant, "metal_purity_id", None)
+            purity_row = (
+                db.query(MetalPurity).filter(MetalPurity.id == purity_id).first()
+                if purity_id
+                else None
+            )
             if purity_row and purity_row.numeric_purity is not None:
                 purity_factor = Decimal(purity_row.numeric_purity) / Decimal("100")
 
