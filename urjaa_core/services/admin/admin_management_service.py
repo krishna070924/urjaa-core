@@ -15,6 +15,7 @@ from urjaa_core.models.product_collection import ProductCollection
 from urjaa_core.models.product_tag import ProductTag
 from urjaa_core.models.product_stone import ProductStone
 from urjaa_core.models.product_variant import ProductVariant
+from urjaa_core.services import physical_unit_service
 from urjaa_core.models.attribute import Attribute
 from urjaa_core.models.attribute_value import AttributeValue
 from urjaa_core.models.base_metal import BaseMetal
@@ -2248,6 +2249,8 @@ class AdminManagementService:
     def restock_variant(db: Session, store_id: UUID, variant_id: UUID, quantity: int) -> ProductVariant:
         if quantity <= 0:
             raise HTTPException(status_code=422, detail="Restock quantity must be positive")
+        if physical_unit_service.is_tracked(db, variant_id):
+            raise HTTPException(status_code=409, detail="This item is tracked piece by piece: add the new pieces instead of a count")
         variant = AdminManagementRepository.increment_variant_stock(
             db, variant_id=variant_id, store_id=store_id, quantity=quantity
         )

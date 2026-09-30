@@ -63,6 +63,8 @@ class SaleCreateRequest(BaseModel):
     weight: float | None = Field(default=None, ge=0)
     final_price: float = Field(ge=0)
     date_time: datetime | None = None
+    # D22: required for items tracked piece by piece — which pieces left the counter.
+    unit_ids: list[int] | None = None
 
 
 class BulkSaleItemRequest(BaseModel):
@@ -71,6 +73,7 @@ class BulkSaleItemRequest(BaseModel):
     quantity: int = Field(gt=0)
     weight: float | None = Field(default=None, ge=0)
     final_price: float = Field(ge=0)
+    unit_ids: list[int] | None = None
 
 
 class BulkSaleCreateRequest(BaseModel):

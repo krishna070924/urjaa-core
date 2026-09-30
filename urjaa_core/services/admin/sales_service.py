@@ -21,6 +21,7 @@ from urjaa_core.models.sale import Sale
 from urjaa_core.models.store import Store
 from urjaa_core.models.user import User
 from urjaa_core.repositories.admin.sales_repository import SalesRepository
+from urjaa_core.services import physical_unit_service
 from urjaa_core.schemas.admin.sales import (
     BulkSaleCreateRequest,
     BulkSaleItemRequest,
@@ -498,6 +499,8 @@ class SalesService:
             )
 
             SalesRepository.create_sale(db, sale)
+            physical_unit_service.take_units(db, variant.id, payload.quantity, unit_ids=payload.unit_ids, sale=sale)
+            db.refresh(variant)
 
             response = {
                 "id": sale.id,
@@ -592,6 +595,7 @@ class SalesService:
                     order_id=order_id,
                 )
                 SalesRepository.create_sale(db, sale)
+                physical_unit_service.take_units(db, item.variant_id, item.quantity, unit_ids=item.unit_ids, sale=sale)
                 created_sales.append(sale)
 
         return {
