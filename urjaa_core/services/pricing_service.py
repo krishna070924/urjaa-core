@@ -62,6 +62,22 @@ def _get_cached_metal_rate(db, base_metal_id) -> Decimal | None:
     return rate_value
 
 
+def _stone_cost(variant) -> Decimal:
+    """Stone cost for pricing one variant (H-09).
+
+    Stones belong to the PRODUCT and every variant uses them, so the product's
+    per-row costs are summed. If no stone row has a cost recorded, fall back to
+    the legacy per-variant `stone_cost` — which keeps every existing price
+    unchanged until staff enter per-stone costs.
+    """
+    product = getattr(variant, "product", None)
+    rows = getattr(product, "stones", None) or []
+    costed = [Decimal(row.cost) for row in rows if getattr(row, "cost", None) is not None]
+    if costed:
+        return sum(costed, Decimal("0"))
+    return Decimal(variant.stone_cost or 0)
+
+
 def _report_pricing_fallback(variant, base_metal_id) -> None:
     """Log (and optionally Sentry-capture) that a variant could not be priced."""
     product_id = getattr(variant, "product_id", None)
@@ -149,7 +165,7 @@ class PricingService:
         adjusted_rate = rate * purity_factor
 
         weight = Decimal(variant.metal_weight_grams or 0)
-        stone = Decimal(variant.stone_cost or 0)
+        stone = _stone_cost(variant)
         making = Decimal(variant.making_charges or 0)
 
         computed_price = (weight * adjusted_rate) + stone + making
