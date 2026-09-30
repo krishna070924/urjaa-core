@@ -753,6 +753,8 @@ class AdminManagementRepository:
             .options(selectinload(Product.subcategory), selectinload(Product.variants), selectinload(Product.store))
             .outerjoin(Subcategory, Subcategory.id == Product.subcategory_id)
             .outerjoin(Category, Category.id == Subcategory.category_id)
+            # H-08: default admin list hides soft-deleted products.
+            .filter(Product.deleted_at.is_(None))
             .order_by(Product.created_at.desc())
         )
 
@@ -782,6 +784,8 @@ class AdminManagementRepository:
                 selectinload(Product.variants),
                 selectinload(Product.images),
             )
+            # H-08: default admin list (cross-store) hides soft-deleted products.
+            .filter(Product.deleted_at.is_(None))
             .order_by(Product.updated_at.desc().nullslast(), Product.created_at.desc().nullslast())
             .all()
         )
@@ -836,10 +840,6 @@ class AdminManagementRepository:
         db.query(ProductAttribute).filter(ProductAttribute.product_id == product_id).delete()
         db.query(ProductCollection).filter(ProductCollection.product_id == product_id).delete()
         db.query(ProductTag).filter(ProductTag.product_id == product_id).delete()
-
-    @staticmethod
-    def delete_product(db: Session, product: Product) -> None:
-        db.delete(product)
 
     @staticmethod
     def get_subcategory_by_id(db: Session, subcategory_id: int) -> Subcategory | None:

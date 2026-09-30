@@ -70,7 +70,11 @@ class ReviewService:
 
     @staticmethod
     def _get_product_or_404(db: Session, product_id: UUID) -> Product:
-        product = db.query(Product).filter(Product.id == product_id).first()
+        product = (
+            db.query(Product)
+            .filter(Product.id == product_id, Product.deleted_at.is_(None))
+            .first()
+        )
         if product is None:
             raise HTTPException(status_code=404, detail="Product not found")
 
@@ -225,7 +229,11 @@ class ReviewService:
             db.query(ProductReview, User.full_name, Product.name, Product.slug)
             .join(Product, Product.id == ProductReview.product_id)
             .outerjoin(User, User.id == ProductReview.user_id)
-            .filter(ProductReview.is_approved.is_(True), ProductReview.rating >= 4)
+            .filter(
+                ProductReview.is_approved.is_(True),
+                ProductReview.rating >= 4,
+                Product.deleted_at.is_(None),
+            )
             .order_by(ProductReview.rating.desc(), ProductReview.created_at.desc())
             .limit(normalized_limit)
             .all()

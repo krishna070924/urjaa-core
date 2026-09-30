@@ -53,7 +53,7 @@ class CheckoutService:
             if not product:
                 raise HTTPException(status_code=404, detail=f"Product not found: {item.product_id}")
 
-            if product.status != "active":
+            if product.status != "active" or product.deleted_at is not None:
                 raise HTTPException(status_code=400, detail=f"Product is not available: {item.product_id}")
 
             # H-7 FIX: Use SELECT ... FOR UPDATE to acquire a row-level lock on the variant

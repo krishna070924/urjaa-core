@@ -174,7 +174,7 @@ class OrderService:
             if product is None or variant is None:
                 raise HTTPException(status_code=409, detail="Cart item references unavailable product variant")
 
-            if product.status != "active":
+            if product.status != "active" or product.deleted_at is not None:
                 raise HTTPException(status_code=409, detail=f"Product is not available: {product.name}")
 
             if variant.product_id != product.id:
