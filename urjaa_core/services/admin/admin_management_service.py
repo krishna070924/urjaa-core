@@ -2437,11 +2437,13 @@ class AdminManagementService:
             variant.metal_purity_id = metal.metal_purity_id
         elif (
             payload.base_metal_id is not None
-            and payload.metal_color_id is not None
-            and payload.metal_purity_id is not None
+            or payload.metal_color_id is not None
+            or payload.metal_purity_id is not None
         ):
+            # Any legacy id changed -> re-resolve from the variant's resulting
+            # triad, so metal_id never keeps pointing at the old combination.
             variant.metal_id = AdminManagementService._resolve_metal_id_from_legacy(
-                db, payload.base_metal_id, payload.metal_color_id, payload.metal_purity_id
+                db, variant.base_metal_id, variant.metal_color_id, variant.metal_purity_id
             )
 
         try:

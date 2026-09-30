@@ -143,6 +143,14 @@ def main() -> None:
         assert updated.metal_id == gold_22k.id, updated.metal_id
         print("update(legacy triad)               -> metal_id resolved OK")
 
+        # 6b. Changing only the colour must move metal_id to the new combination.
+        y18 = db.query(Metal).filter(Metal.display_name == "18K Yellow Gold").one()
+        w18 = db.query(Metal).filter(Metal.display_name == "18K White Gold").one()
+        v6 = svc.create_variant(db, store.id, product.id, VariantCreateRequest(metal_id=y18.id))
+        v6 = svc.update_variant(db, store.id, v6.id, VariantUpdateRequest(metal_color_id=w18.metal_color_id))
+        assert v6.metal_id == w18.id, v6.metal_id
+        print("update(colour only)                -> metal_id follows OK")
+
         # 7. Per-stone cost persists and PricingService reflects it.
         priced = svc.create_variant(
             db, store.id, product.id,
