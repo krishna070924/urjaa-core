@@ -2602,6 +2602,14 @@ class AdminManagementService:
                 "stone_id": item.stone_id,
                 "quantity": item.quantity,
                 "total_carat_weight": item.total_carat_weight,
+                # H-05: certification fields folded back from the admin-backend
+                # B-02 local patch -- StoneAssignmentItem carries them now.
+                "cut": item.cut,
+                "clarity": item.clarity,
+                "color": item.color,
+                "origin": item.origin,
+                "certificate_number": item.certificate_number,
+                "certification_agency": item.certification_agency,
             }
             for item in payload.stones
         ]

@@ -2,7 +2,9 @@ from typing import Annotated, Literal
 from datetime import date, datetime
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+from urjaa_core.models.product_stone import CERTIFICATION_AGENCIES
 
 
 ProductStatus = Literal["draft", "active", "hidden", "archived"]
@@ -107,6 +109,22 @@ class StoneAssignmentItem(BaseModel):
     stone_id: int = Field(gt=0)
     quantity: int | None = Field(default=None, ge=0)
     total_carat_weight: float | None = Field(default=None, ge=0)
+    # H-05: folded back from urjaa-admin-backend's local B-02 extension now
+    # that core isn't locked -- hand-entered certification (D13), all
+    # nullable (D3), never required to create a product or variant.
+    cut: str | None = Field(default=None, max_length=50)
+    clarity: str | None = Field(default=None, max_length=20)
+    color: str | None = Field(default=None, max_length=20)
+    origin: str | None = Field(default=None, max_length=100)
+    certificate_number: str | None = Field(default=None, max_length=100)
+    certification_agency: str | None = Field(default=None, max_length=10)
+
+    @field_validator("certification_agency")
+    @classmethod
+    def _validate_certification_agency(cls, v: str | None) -> str | None:
+        if v is not None and v not in CERTIFICATION_AGENCIES:
+            raise ValueError(f"certification_agency must be one of {', '.join(CERTIFICATION_AGENCIES)}")
+        return v
 
 
 class ProductStonesUpdateRequest(BaseModel):
@@ -451,10 +469,23 @@ class AdminVariantResponse(BaseModel):
     id: UUID
     product_id: UUID
     attribute_values: list[AdminAttributeValueLookupResponse] = Field(default_factory=list)
+    # D21/H-01: the one variation dimension (ring size, length, ...). Display
+    # label (attribute_label) and its unit/label come from the subcategory.
+    size_value: str | None = None
+    spec_note: str | None = None
+    attribute_label: str | None = None
     base_metal_id: int | None
     metal_type: str | None
     metal_color_id: int | None
     metal_purity_id: int | None
+    # D25/H-07: the one FK that matters going forward; base_metal_id /
+    # metal_color_id / metal_purity_id above are legacy, kept until every
+    # reader is migrated (H-06). *_name/_label resolve through metal_id with
+    # legacy fallback -- same properties the storefront's VariantResponse uses.
+    metal_id: int | None = None
+    base_metal_name: str | None = None
+    metal_color_name: str | None = None
+    metal_purity_label: str | None = None
     weight: float | None
     metal_weight_grams: float | None
     stone_quantity: int | None = None
@@ -486,6 +517,13 @@ class AdminStoneRelationItem(BaseModel):
     stone_id: int
     quantity: int | None
     total_carat_weight: float | None
+    # H-05: folded back from the admin-backend's local B-02 extension.
+    cut: str | None = None
+    clarity: str | None = None
+    color: str | None = None
+    origin: str | None = None
+    certificate_number: str | None = None
+    certification_agency: str | None = None
 
 
 class AdminProductDetailResponse(AdminProductResponse):

@@ -439,7 +439,9 @@ class OrderService:
         if order_ids:
             items = (
                 db.query(Order)
-                .options(selectinload(Order.items))
+                # Admin-only path (H-05): also eager-load the physical unit(s)
+                # each line reserved/sold, for AdminOrderItemResponse.huid_numbers.
+                .options(selectinload(Order.items).selectinload(OrderItem.physical_units))
                 .filter(Order.id.in_(order_ids))
                 .order_by(Order.created_at.desc())
                 .all()
@@ -468,7 +470,8 @@ class OrderService:
 
         order = (
             db.query(Order)
-            .options(selectinload(Order.items))
+            # Admin-only path (H-05): see list_admin_orders above.
+            .options(selectinload(Order.items).selectinload(OrderItem.physical_units))
             .outerjoin(Sale, Sale.order_id == Order.id)
             .filter(Order.id == order_id)
             .filter(or_(Sale.source == "website", Sale.id.is_(None)))
