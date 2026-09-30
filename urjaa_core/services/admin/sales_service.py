@@ -210,7 +210,7 @@ class SalesService:
             raise HTTPException(status_code=400, detail="Final price must be greater than 0")
 
         product = SalesRepository.get_product_by_id(db, item.product_id, store_id=store_id)
-        if not product:
+        if not product or product.deleted_at is not None:
             raise HTTPException(status_code=404, detail="Selected product was not found")
 
         variant = SalesRepository.get_variant_by_id_for_update(db, item.variant_id, store_id=store_id)
