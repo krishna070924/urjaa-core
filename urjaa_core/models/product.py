@@ -82,6 +82,16 @@ class Product(Base):
 
         return self.subcategory.category_id
 
+    # J-01: passthrough for the storefront's size picker — the subcategory is
+    # the one source of truth for what this product's size dimension is called.
+    @property
+    def size_label(self) -> str | None:
+        return self.subcategory.size_label if self.subcategory else None
+
+    @property
+    def size_unit(self) -> str | None:
+        return self.subcategory.size_unit if self.subcategory else None
+
     @property
     def collection_id(self) -> int | None:
         if not self.collections:

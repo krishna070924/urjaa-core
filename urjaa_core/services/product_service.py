@@ -30,6 +30,7 @@ class ProductService:
         metal: str | list[str] | None = None,
         metal_color: str | list[str] | None = None,
         purity: str | list[str] | None = None,
+        size: str | list[str] | None = None,
         page: int = 1,
         limit: int = 20,
     ):
@@ -53,6 +54,7 @@ class ProductService:
             metal_name=metal,
             metal_color_name=metal_color,
             purity_label=purity,
+            size_value=size,
             page=page,
             limit=limit,
         )
@@ -68,6 +70,7 @@ class ProductService:
             "metal": metal,
             "metal_color": metal_color,
             "purity": purity,
+            "size": size,
             "sort": sort,
             "min_price": min_price,
             "max_price": max_price,

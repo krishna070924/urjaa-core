@@ -29,6 +29,7 @@ class ProductRepository:
         metal_name: str | list[str] | None = None,
         metal_color_name: str | list[str] | None = None,
         purity_label: str | list[str] | None = None,
+        size_value: str | list[str] | None = None,
         page: int = 1,
         limit: int = 20,
     ):
@@ -49,6 +50,7 @@ class ProductRepository:
             "metal": metal_name,
             "metal_color": metal_color_name,
             "purity": purity_label,
+            "size": size_value,
             "min_price": min_price,
             "max_price": max_price,
             "featured": featured,

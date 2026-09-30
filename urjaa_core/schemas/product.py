@@ -41,6 +41,9 @@ class VariantResponse(BaseModel):
 
     id: UUID
     attribute_label: str | None
+    # D21/J-01: the raw value + which combination it belongs to. The storefront
+    # size picker reads this directly rather than parsing `attribute_label`.
+    size_value: str | None = None
     base_metal_name: str | None
     metal_color_name: str | None
     metal_purity_label: str | None
@@ -81,6 +84,11 @@ class ProductDetailResponse(ProductBase):
     status: str
     starting_price: float | None = None
     formatted_price: str = ""
+    # J-01: what the subcategory calls its size dimension, and its unit. Both
+    # null means this product's category doesn't vary by size — the storefront
+    # hides the size picker entirely rather than showing an empty one.
+    size_label: str | None = None
+    size_unit: str | None = None
 
     variants: list[VariantResponse]
     stones: list[StoneResponse] = []
