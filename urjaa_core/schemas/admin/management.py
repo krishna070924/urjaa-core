@@ -426,6 +426,8 @@ class AdminMetalTypeLookupResponse(BaseModel):
 class AdminMetalColorLookupResponse(BaseModel):
     id: int
     name: str
+    # D23: lets the admin narrow colours to the chosen base metal.
+    base_metal_id: int | None = None
 
     class Config:
         orm_mode = True
