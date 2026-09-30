@@ -16,6 +16,7 @@ from urjaa_core.models.product import Product
 from urjaa_core.models.product_variant import ProductVariant
 from urjaa_core.models.sale import Sale
 from urjaa_core.models.user import User
+from urjaa_core.services import physical_unit_service
 from urjaa_core.services.pricing_service import PricingService, round_money
 
 ORDER_STATUS_VALUES = ("PENDING", "CONFIRMED", "PROCESSING", "SHIPPED", "DELIVERED", "CANCELLED")
@@ -282,6 +283,11 @@ class OrderService:
             db.add(order)
             db.flush()
 
+            # D22: pin the oldest in-stock piece (and its HUID) to each line of
+            # a variant tracked by piece. No-op for count-only variants.
+            for item in order_items:
+                physical_unit_service.take_units(db, item.variant_id, item.quantity, order_item=item)
+
             representative_item = order_items[0]
             sale_store_id = order_store_id or representative_item.store_id
             website_sale = Sale(
@@ -512,6 +518,10 @@ class OrderService:
                 variant = variants_by_id.get(item.variant_id)
                 if variant is not None:
                     variant.stock_quantity = (variant.stock_quantity or 0) + item.quantity
+            physical_unit_service.release_units(db, [item.id for item in order.items])
+
+        if normalized_status == "SHIPPED":
+            physical_unit_service.mark_sold(db, [item.id for item in order.items])
 
         linked_sale = (
             db.query(Sale)
