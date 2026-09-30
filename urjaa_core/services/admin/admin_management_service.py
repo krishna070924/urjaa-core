@@ -21,6 +21,7 @@ from urjaa_core.models.attribute_value import AttributeValue
 from urjaa_core.models.base_metal import BaseMetal
 from urjaa_core.models.category import Category
 from urjaa_core.models.collection import Collection
+from urjaa_core.models.metal import Metal
 from urjaa_core.models.metal_color import MetalColor
 from urjaa_core.models.metal_purity import MetalPurity
 from urjaa_core.models.metal_rate import MetalRate
@@ -44,6 +45,7 @@ from urjaa_core.schemas.admin.management import (
     ImageCreateRequest,
     MetalColorCreateRequest,
     MetalColorUpdateRequest,
+    MetalCombinationGenerateRequest,
     MetalPurityCreateRequest,
     MetalPurityUpdateRequest,
     MetalRateBulkUpdateRequest,
@@ -1176,6 +1178,119 @@ class AdminManagementService:
         except IntegrityError:
             db.rollback()
             raise HTTPException(status_code=409, detail="Metal color is in use and cannot be deleted")
+        except Exception:
+            db.rollback()
+            raise
+
+    @staticmethod
+    def get_metals(db: Session) -> list[Metal]:
+        return AdminManagementRepository.get_metals(db)
+
+    @staticmethod
+    def generate_metal_combinations(
+        db: Session, payload: MetalCombinationGenerateRequest
+    ) -> tuple[list[dict], list[dict]]:
+        """D26: create every missing (colour x purity) combination for one
+        base metal. Existing combinations are left untouched — that's what
+        makes running this twice produce zero new rows.
+
+        Colours/purities that don't belong to the chosen base metal are
+        rejected the same way `_validate_metal_colour_pairing` rejects them
+        on a variant (D23), just surfaced as a 422 here since this endpoint
+        validates a batch of ids rather than one FK on a single record.
+        """
+        base_metal = AdminManagementRepository.get_metal_type_by_id(db, payload.base_metal_id)
+        if not base_metal:
+            raise HTTPException(status_code=404, detail="Metal type not found")
+
+        colour_ids = list(dict.fromkeys(payload.metal_color_ids))
+        purity_ids = list(dict.fromkeys(payload.metal_purity_ids))
+
+        colours = AdminManagementRepository.get_metal_colors_by_ids(db, colour_ids)
+        if len(colours) != len(colour_ids):
+            raise HTTPException(status_code=404, detail="One or more metal colours not found")
+        for colour in colours:
+            if colour.base_metal_id is not None and colour.base_metal_id != base_metal.id:
+                raise AdminManagementService._field_error(
+                    "metal_color_ids",
+                    f"Metal colour {colour.name!r} does not belong to the selected base metal",
+                )
+
+        purities = AdminManagementRepository.get_metal_purities_by_ids(db, purity_ids)
+        if len(purities) != len(purity_ids):
+            raise HTTPException(status_code=404, detail="One or more metal purities not found")
+        for purity in purities:
+            if purity.base_metal_id is not None and purity.base_metal_id != base_metal.id:
+                raise AdminManagementService._field_error(
+                    "metal_purity_ids",
+                    f"Metal purity {purity.purity_label!r} does not belong to the selected base metal",
+                )
+
+        colour_by_id = {colour.id: colour.name for colour in colours}
+        purity_by_id = {purity.id: purity.purity_label for purity in purities}
+
+        existing = AdminManagementRepository.get_metals_by_selectors(db, base_metal.id, colour_ids, purity_ids)
+        existing_by_key = {(m.metal_color_id, m.metal_purity_id): m for m in existing}
+
+        # "22K Yellow Gold" — same "<purity> <colour> <base metal>" order as
+        # scripts/seed_dev_catalogue.sql. display_name stays editable
+        # afterwards, so this default doesn't need to be perfect.
+        rows_to_insert = [
+            {
+                "base_metal_id": base_metal.id,
+                "metal_color_id": colour.id,
+                "metal_purity_id": purity.id,
+                "display_name": f"{purity.purity_label or ''} {colour.name} {base_metal.name}".strip(),
+            }
+            for colour in colours
+            for purity in purities
+            if (colour.id, purity.id) not in existing_by_key
+        ]
+
+        try:
+            created_rows = AdminManagementRepository.bulk_insert_metals(db, rows_to_insert)
+            db.commit()
+        except Exception:
+            db.rollback()
+            raise
+
+        def _to_response(metal_color_id: int, metal_purity_id: int, display_name: str | None, metal_id: int) -> dict:
+            return {
+                "id": metal_id,
+                "base_metal_id": base_metal.id,
+                "base_metal_name": base_metal.name,
+                "metal_color_id": metal_color_id,
+                "metal_color_name": colour_by_id.get(metal_color_id),
+                "metal_purity_id": metal_purity_id,
+                "metal_purity_label": purity_by_id.get(metal_purity_id),
+                "display_name": display_name,
+            }
+
+        created = [
+            _to_response(row["metal_color_id"], row["metal_purity_id"], row["display_name"], row["id"])
+            for row in created_rows
+        ]
+        skipped = [
+            _to_response(metal.metal_color_id, metal.metal_purity_id, metal.display_name, metal.id)
+            for metal in existing_by_key.values()
+        ]
+        return created, skipped
+
+    @staticmethod
+    def delete_metal_combination(db: Session, metal_id: int) -> None:
+        metal = AdminManagementRepository.get_metal_by_id(db, metal_id)
+        if not metal:
+            raise HTTPException(status_code=404, detail="Metal combination not found")
+
+        try:
+            AdminManagementRepository.delete_metal(db, metal)
+            db.commit()
+        except IntegrityError:
+            db.rollback()
+            raise HTTPException(
+                status_code=409,
+                detail="Metal combination is used by one or more variants and cannot be deleted",
+            )
         except Exception:
             db.rollback()
             raise

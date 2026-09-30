@@ -1,4 +1,4 @@
-from typing import Literal
+from typing import Annotated, Literal
 from datetime import date, datetime
 from uuid import UUID
 
@@ -250,6 +250,15 @@ class MetalColorUpdateRequest(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=50)
 
 
+class MetalCombinationGenerateRequest(BaseModel):
+    """D26: staff pick a base metal plus the colours and purities it comes
+    in; the service creates the missing cross-product `metals` rows."""
+
+    base_metal_id: int = Field(gt=0)
+    metal_color_ids: Annotated[list[Annotated[int, Field(gt=0)]], Field(min_length=1, max_length=25)]
+    metal_purity_ids: Annotated[list[Annotated[int, Field(gt=0)]], Field(min_length=1, max_length=25)]
+
+
 class StoreCreateRequest(BaseModel):
     name: str = Field(min_length=1, max_length=120)
 
@@ -385,6 +394,24 @@ class AdminMetalRateLookupResponse(BaseModel):
     base_metal_name: str | None
     rate_per_gram: float
     effective_from: datetime
+
+
+class AdminMetalCombinationResponse(BaseModel):
+    id: int
+    base_metal_id: int
+    base_metal_name: str | None
+    metal_color_id: int
+    metal_color_name: str | None
+    metal_purity_id: int
+    metal_purity_label: str | None
+    display_name: str | None
+
+
+class MetalCombinationGenerateResponse(BaseModel):
+    created: list[AdminMetalCombinationResponse]
+    skipped: list[AdminMetalCombinationResponse]
+    created_count: int
+    skipped_count: int
 
 
 class AdminProductResponse(BaseModel):
