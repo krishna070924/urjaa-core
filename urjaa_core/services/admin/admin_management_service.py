@@ -5,7 +5,7 @@ from typing import Callable
 
 from fastapi import HTTPException
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy import or_
+from sqlalchemy import func, or_, text
 from sqlalchemy.orm import Session
 
 from urjaa_core.models.product import Product
@@ -85,7 +85,7 @@ class AdminManagementService:
         ),
         "chk_variant_making_non_negative": "Making charges cannot be negative",
         "product_variants_stock_quantity_non_negative": "Stock quantity cannot be negative",
-        "product_variants_sku_code_key": "Variant SKU already exists",
+        "product_variants_sku_code_key": "That SKU is already used by another item. Change it, or leave SKU blank to generate one.",
     }
 
     @staticmethod
@@ -100,6 +100,24 @@ class AdminManagementService:
         return AdminManagementService.VARIANT_CONSTRAINT_MESSAGES.get(
             constraint_name, "Invalid variant data — check numeric fields are valid"
         )
+
+    @staticmethod
+    def _next_sku(db: Session, product: Product) -> str:
+        """Format: first 3 letters of the product's category + a 6-digit
+        sequence, e.g. RIN-000042 (URJ when uncategorised).
+
+        Metal and size are deliberately NOT encoded: a SKU must stay valid when
+        a variant is edited. The sequence is atomic, so concurrent saves cannot
+        collide; the loop only skips a number a hand-typed SKU already took. The
+        unique constraint remains the final arbiter."""
+        subcategory = product.subcategory
+        category = subcategory.category.name if subcategory and subcategory.category else ""
+        prefix = re.sub(r"[^A-Za-z]", "", category)[:3].upper() or "URJ"
+        while True:
+            number = db.execute(text("SELECT nextval('variant_sku_seq')")).scalar()
+            sku = f"{prefix}-{number:06d}"
+            if not db.query(ProductVariant.id).filter(func.lower(ProductVariant.sku_code) == sku.lower()).first():
+                return sku
 
     @staticmethod
     def _normalize_gender_key(value: str | None) -> str:
@@ -408,9 +426,9 @@ class AdminManagementService:
 
         # Slug is always auto-generated from product_name — never accepted from user input.
         # Category is resolved by name (case-insensitive). Subcategory is optional.
+        # variant_sku is optional: blank rows get a generated SKU (H-04).
         required_fields = [
             "product_name",
-            "variant_sku",
         ]
 
         def _slug_taken_globally(candidate: str) -> bool:
@@ -648,7 +666,7 @@ class AdminManagementService:
                     stone_cost=variant_payload["stone_cost"],
                     making_charges=variant_payload["making_charges"],
                     stock_quantity=variant_payload["stock_quantity"],
-                    sku_code=variant_payload["sku_code"],
+                    sku_code=variant_payload["sku_code"] or AdminManagementService._next_sku(db, product),
                 )
                 AdminManagementRepository.create_variant(db, variant)
                 created_variant_count += 1
@@ -1754,7 +1772,11 @@ class AdminManagementService:
             candidate_sku = (variant_item.sku_code or "").strip()
 
             if not candidate_sku:
-                candidate_sku = f"{slug}-{index + 1:03d}"
+                # Generated at insert time, once the product exists (H-04).
+                normalized_variants.append(
+                    {"stock_quantity": variant_item.stock_quantity, "price_override": variant_item.price_override, "sku_code": None}
+                )
+                continue
 
             normalized_sku = re.sub(r"[^a-zA-Z0-9_-]", "-", candidate_sku).strip("-_")
             normalized_sku = re.sub(r"-+", "-", normalized_sku)
@@ -1800,7 +1822,7 @@ class AdminManagementService:
                         product_id=created.id,
                         stock_quantity=variant_item["stock_quantity"],
                         price_override=variant_item["price_override"],
-                        sku_code=variant_item["sku_code"],
+                        sku_code=variant_item["sku_code"] or AdminManagementService._next_sku(db, created),
                     ),
                 )
 
@@ -2101,9 +2123,12 @@ class AdminManagementService:
         if not product:
             raise HTTPException(status_code=404, detail="Product not found")
 
-        existing_sku = AdminManagementRepository.get_variant_by_sku(db, payload.sku_code, store_id=store_id)
-        if existing_sku:
-            raise HTTPException(status_code=409, detail="Variant SKU already exists")
+        sku_code = (payload.sku_code or "").strip() or AdminManagementService._next_sku(db, product)
+        if payload.sku_code and db.query(ProductVariant.id).filter(func.lower(ProductVariant.sku_code) == sku_code.lower()).first():
+            raise HTTPException(
+                status_code=409,
+                detail=f"SKU {sku_code} is already used by another item. Change it, or leave SKU blank to generate one.",
+            )
 
         attribute_values = AdminManagementService._validate_variant_attribute_value_ids(
             db, payload.attribute_value_ids
@@ -2140,7 +2165,7 @@ class AdminManagementService:
             cost_price=payload.cost_price,
             price_override=payload.price_override,
             stock_quantity=payload.stock_quantity,
-            sku_code=payload.sku_code,
+            sku_code=sku_code,
             internal_notes=payload.internal_notes,
             huid_number=payload.huid_number,
         )

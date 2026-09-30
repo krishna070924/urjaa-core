@@ -63,7 +63,8 @@ class VariantCreateRequest(BaseModel):
     cost_price: float | None = Field(default=0, ge=0)
     price_override: float | None = Field(default=None, ge=0)
     stock_quantity: int = Field(default=0, ge=0)
-    sku_code: str = Field(min_length=1, max_length=100)
+    # Blank -> generated server-side (H-04); a jeweller's own numbering is honoured.
+    sku_code: str | None = Field(default=None, max_length=100)
     internal_notes: str | None = Field(default=None)
     huid_number: str | None = Field(default=None, max_length=50)
 
