@@ -5,6 +5,8 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from urjaa_core.schemas.order import OrderItemResponse, OrderResponse
+
 
 class SalesSummaryResponse(BaseModel):
     active_products: int
@@ -157,3 +159,23 @@ class SaleInvoiceResponse(BaseModel):
     order_id: UUID
     invoice_number: str
     generated_at: datetime
+
+
+# H-05 (Added by H-03): staff need to see which physical piece was
+# reserved/sold for a website order line. HUIDs are staff-only (D22) and must
+# never reach the storefront-facing OrderResponse, so this widens it only for
+# the admin order endpoints.
+class AdminOrderItemResponse(OrderItemResponse):
+    huid_numbers: list[str] = Field(default_factory=list)
+
+
+class AdminOrderResponse(OrderResponse):
+    items: list[AdminOrderItemResponse]
+
+
+class AdminPaginatedOrdersResponse(BaseModel):
+    items: list[AdminOrderResponse]
+    page: int
+    limit: int
+    total: int
+    pages: int

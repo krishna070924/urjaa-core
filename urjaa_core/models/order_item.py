@@ -26,3 +26,18 @@ class OrderItem(Base):
     store = relationship("Store")
     product = relationship("Product")
     variant = relationship("ProductVariant")
+
+    # H-03/H-05: the physical piece(s) (D22) this line reserved or sold, if the
+    # variant is tracked piece-by-piece. Untracked variants: always empty.
+    # viewonly — physical_unit_service owns writes via order_item_id.
+    physical_units = relationship(
+        "VariantPhysicalUnit",
+        primaryjoin="OrderItem.id==VariantPhysicalUnit.order_item_id",
+        viewonly=True,
+    )
+
+    @property
+    def huid_numbers(self) -> list[str]:
+        """HUIDs of this line's reserved/sold piece(s). Staff-only (admin
+        schemas only) — not on the storefront-facing OrderItemResponse."""
+        return [unit.huid_number for unit in self.physical_units if unit.huid_number]

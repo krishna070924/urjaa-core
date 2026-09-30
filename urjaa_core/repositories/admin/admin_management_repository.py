@@ -1062,5 +1062,12 @@ class AdminManagementRepository:
                     stone_id=stone["stone_id"],
                     quantity=stone.get("quantity"),
                     total_carat_weight=stone.get("total_carat_weight"),
+                    # H-05: folded back from the admin-backend's B-02 local patch.
+                    cut=stone.get("cut"),
+                    clarity=stone.get("clarity"),
+                    color=stone.get("color"),
+                    origin=stone.get("origin"),
+                    certificate_number=stone.get("certificate_number"),
+                    certification_agency=stone.get("certification_agency"),
                 )
             )
