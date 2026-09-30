@@ -2,6 +2,7 @@ from datetime import date, timedelta
 from uuid import UUID
 
 from sqlalchemy import case, func, or_
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session, selectinload
 
 from urjaa_core.models.attribute import Attribute
@@ -9,6 +10,7 @@ from urjaa_core.models.attribute_value import AttributeValue
 from urjaa_core.models.base_metal import BaseMetal
 from urjaa_core.models.category import Category
 from urjaa_core.models.collection import Collection
+from urjaa_core.models.metal import Metal
 from urjaa_core.models.metal_color import MetalColor
 from urjaa_core.models.metal_purity import MetalPurity
 from urjaa_core.models.metal_rate import MetalRate
@@ -531,6 +533,72 @@ class AdminManagementRepository:
     @staticmethod
     def delete_metal_color(db: Session, metal_color: MetalColor) -> None:
         db.delete(metal_color)
+
+    @staticmethod
+    def get_metal_colors_by_ids(db: Session, ids: list[int]) -> list[MetalColor]:
+        if not ids:
+            return []
+        return db.query(MetalColor).filter(MetalColor.id.in_(ids)).all()
+
+    @staticmethod
+    def get_metal_purities_by_ids(db: Session, ids: list[int]) -> list[MetalPurity]:
+        if not ids:
+            return []
+        return db.query(MetalPurity).filter(MetalPurity.id.in_(ids)).all()
+
+    @staticmethod
+    def get_metals(db: Session) -> list[Metal]:
+        return (
+            db.query(Metal)
+            .options(
+                selectinload(Metal.base_metal),
+                selectinload(Metal.metal_color),
+                selectinload(Metal.metal_purity),
+            )
+            .order_by(Metal.base_metal_id.asc(), Metal.display_name.asc())
+            .all()
+        )
+
+    @staticmethod
+    def get_metal_by_id(db: Session, metal_id: int) -> Metal | None:
+        return db.query(Metal).filter(Metal.id == metal_id).first()
+
+    @staticmethod
+    def get_metals_by_selectors(
+        db: Session, base_metal_id: int, metal_color_ids: list[int], metal_purity_ids: list[int]
+    ) -> list[Metal]:
+        return (
+            db.query(Metal)
+            .filter(
+                Metal.base_metal_id == base_metal_id,
+                Metal.metal_color_id.in_(metal_color_ids),
+                Metal.metal_purity_id.in_(metal_purity_ids),
+            )
+            .all()
+        )
+
+    @staticmethod
+    def bulk_insert_metals(db: Session, rows: list[dict]) -> list[dict]:
+        """INSERT ... ON CONFLICT DO NOTHING on uq_metals_combination — a
+        concurrency safety net on top of the caller's own pre-check, so a
+        combination created by a second request between that check and this
+        insert is skipped rather than raising IntegrityError. RETURNING only
+        reports the rows Postgres actually inserted (D26: idempotent)."""
+        if not rows:
+            return []
+        stmt = (
+            pg_insert(Metal)
+            .values(rows)
+            .on_conflict_do_nothing(constraint="uq_metals_combination")
+            .returning(Metal.id, Metal.metal_color_id, Metal.metal_purity_id, Metal.display_name)
+        )
+        result = db.execute(stmt)
+        db.flush()
+        return [dict(row._mapping) for row in result]
+
+    @staticmethod
+    def delete_metal(db: Session, metal: Metal) -> None:
+        db.delete(metal)
 
     @staticmethod
     def create_metal_rate(db: Session, metal_rate: MetalRate) -> MetalRate:

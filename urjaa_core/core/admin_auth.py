@@ -279,7 +279,9 @@ ADMIN_ROUTE_PERMISSION_RULES: list[dict[str, Any]] = [
         "any_of": {ADMIN_PERMISSION_MANAGE_PRODUCTS},
     },
     {
-        "pattern": re.compile(r"^/admin/(metal-types|metal-purities|metal-colors|metal-rates)(?:/.*)?$"),
+        # H-07: /admin/metals is the admin-generated combination dimension
+        # (D26) — same bucket as the other metal lookups it's built from.
+        "pattern": re.compile(r"^/admin/(metal-types|metal-purities|metal-colors|metal-rates|metals)(?:/.*)?$"),
         "methods": WRITE_METHODS,
         "any_of": {ADMIN_PERMISSION_MANAGE_INVENTORY},
     },
@@ -290,7 +292,7 @@ ADMIN_ROUTE_PERMISSION_RULES: list[dict[str, Any]] = [
         "any_of": {ADMIN_PERMISSION_MANAGE_PRODUCTS, ADMIN_PERMISSION_MANAGE_INVENTORY, ADMIN_PERMISSION_MANAGE_WEBSITE},
     },
     {
-        "pattern": re.compile(r"^/admin/(metal-types|metal-purities|metal-colors|metal-rates)(?:/.*)?$"),
+        "pattern": re.compile(r"^/admin/(metal-types|metal-purities|metal-colors|metal-rates|metals)(?:/.*)?$"),
         "methods": {"GET"},
         "any_of": {ADMIN_PERMISSION_MANAGE_INVENTORY, ADMIN_PERMISSION_MANAGE_PRODUCTS},
     },
