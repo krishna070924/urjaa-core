@@ -1235,12 +1235,17 @@ class AdminManagementService:
         # "22K Yellow Gold" — same "<purity> <colour> <base metal>" order as
         # scripts/seed_dev_catalogue.sql. display_name stays editable
         # afterwards, so this default doesn't need to be perfect.
+        # A metal with a single colour (Silver, Platinum) reads "925 Silver",
+        # not "925 Silver Silver" — same rule as the seed script.
+        single_colour = db.query(MetalColor).filter(MetalColor.base_metal_id == base_metal.id).count() == 1
         rows_to_insert = [
             {
                 "base_metal_id": base_metal.id,
                 "metal_color_id": colour.id,
                 "metal_purity_id": purity.id,
-                "display_name": f"{purity.purity_label or ''} {colour.name} {base_metal.name}".strip(),
+                "display_name": " ".join(
+                    part for part in (purity.purity_label, None if single_colour else colour.name, base_metal.name) if part
+                ),
             }
             for colour in colours
             for purity in purities
