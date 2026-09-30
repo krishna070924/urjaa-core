@@ -40,6 +40,7 @@ class CatalogQueryBuilder:
         "metal": "filter_metal",
         "metal_color": "filter_metal_color",
         "purity": "filter_purity",
+        "size": "filter_size",
         "min_price": "filter_min_price",
         "max_price": "filter_max_price",
     }
@@ -325,6 +326,14 @@ class CatalogQueryBuilder:
         if purity_values:
             self._join_metal_purity()
             self.query = self.query.filter(func.lower(MetalPurity.purity_label).in_(purity_values))
+
+        return self
+
+    def filter_size(self, size_value: str | Sequence[str] | None):
+        size_values = self._normalize_values(size_value)
+        if size_values:
+            self._join_variant()
+            self.query = self.query.filter(func.lower(ProductVariant.size_value).in_(size_values))
 
         return self
 

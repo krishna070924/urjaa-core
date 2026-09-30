@@ -34,6 +34,7 @@ class CatalogAggregationService:
             "metals": lambda: CatalogAggregationRepository.get_metal_counts(db, base_query),
             "metal_colors": lambda: CatalogAggregationRepository.get_metal_color_counts(db, base_query),
             "metal_purities": lambda: CatalogAggregationRepository.get_metal_purity_counts(db, base_query),
+            "sizes": lambda: CatalogAggregationRepository.get_size_counts(db, base_query),
             "attributes_data": lambda: CatalogAggregationRepository.get_attribute_counts(db, base_query),
             "price_ranges": lambda: CatalogAggregationRepository.get_price_buckets(db, store_id, base_query),
         }
@@ -62,6 +63,7 @@ class CatalogAggregationService:
             "metals": results["metals"],
             "metal_colors": results["metal_colors"],
             "metal_purities": results["metal_purities"],
+            "sizes": results["sizes"],
             "genders": genders,
             "attributes": dynamic_attributes,
             "price_ranges": results["price_ranges"],

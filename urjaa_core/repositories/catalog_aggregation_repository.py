@@ -211,6 +211,39 @@ class CatalogAggregationRepository:
         ]
 
     @staticmethod
+    def get_size_counts(db: Session, base_query):
+        # D21/J-01: size_value is raw text scoped to a subcategory's own label
+        # + unit (a bangle's "6" and a ring's "6" are not the same thing), so
+        # group by all three — two subcategories that happen to share a value
+        # stay as distinct facet buckets rather than merging into one.
+        query = (
+            db.query(
+                ProductVariant.size_value,
+                Subcategory.size_label,
+                Subcategory.size_unit,
+                func.count(func.distinct(base_query.c.id)),
+            )
+            .select_from(base_query)
+            .join(ProductVariant, ProductVariant.product_id == base_query.c.id)
+            .join(Product, Product.id == base_query.c.id)
+            .join(Subcategory, Subcategory.id == Product.subcategory_id)
+            .filter(ProductVariant.size_value.isnot(None))
+            .group_by(ProductVariant.size_value, Subcategory.size_label, Subcategory.size_unit)
+            .order_by(Subcategory.size_label.asc(), ProductVariant.size_value.asc())
+        )
+
+        return [
+            {
+                "size": size_value,
+                "slug": _slugify(size_value),
+                "label": size_label,
+                "unit": size_unit,
+                "count": count,
+            }
+            for size_value, size_label, size_unit, count in query.all()
+        ]
+
+    @staticmethod
     def get_attribute_counts(db: Session, base_query):
 
         query = (
