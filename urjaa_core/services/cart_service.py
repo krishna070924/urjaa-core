@@ -32,7 +32,7 @@ class CartService:
         if product is None:
             raise HTTPException(status_code=404, detail="Product not found")
 
-        if product.status != "active":
+        if product.status != "active" or product.deleted_at is not None:
             raise HTTPException(status_code=400, detail="Product is not available")
 
         variant = db.query(ProductVariant).filter(ProductVariant.id == variant_id).first()

@@ -144,6 +144,7 @@ class ProductRepository:
             .filter(
                 Product.slug == slug,
                 Product.status == "active",
+                Product.deleted_at.is_(None),
             )
         )
 
@@ -175,6 +176,7 @@ class ProductRepository:
             .filter(Product.id.in_(product_ids))
             .filter(
                 Product.status == "active",
+                Product.deleted_at.is_(None),
             )
         )
 

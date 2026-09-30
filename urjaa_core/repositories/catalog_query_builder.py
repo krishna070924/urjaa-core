@@ -440,6 +440,9 @@ class CatalogQueryBuilder:
     def only_active(self):
         self.query = self.query.filter(
             Product.status == "active",
+            # H-08: soft delete is separate from status - a deleted product
+            # can still carry status "active", so this must be checked too.
+            Product.deleted_at.is_(None),
         )
         if self.store_id is not None:
             self.query = self.query.filter(Product.store_id == self.store_id)

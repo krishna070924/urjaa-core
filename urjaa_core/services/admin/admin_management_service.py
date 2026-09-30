@@ -2012,48 +2012,18 @@ class AdminManagementService:
 
     @staticmethod
     def delete_product(db: Session, store_id: UUID, product_id: UUID, force: bool = False) -> None:
+        """H-08: soft delete. Sets deleted_at instead of hard-deleting the product
+        and cascading through its variants/images/sales/etc - those rows must
+        survive so existing orders and sales history keep resolving product/variant
+        details. `force` is accepted for API compatibility with callers but soft
+        delete has no dependency gate to bypass."""
         product = AdminManagementRepository.get_product_by_id(db, product_id, store_id=store_id)
         if not product:
             raise HTTPException(status_code=404, detail="Product not found")
 
         try:
-            # Keep deletes ordered to prevent FK failures.
-            deleted_sales = db.query(Sale).filter(Sale.product_id == product_id).delete(synchronize_session=False)
-            deleted_images = db.query(ProductImage).filter(ProductImage.product_id == product_id).delete(synchronize_session=False)
-            variant_ids_subquery = db.query(ProductVariant.id).filter(
-                ProductVariant.product_id == product_id,
-                ProductVariant.store_id == store_id,
-            ).subquery()
-            db.query(VariantAttribute).filter(
-                VariantAttribute.variant_id.in_(db.query(variant_ids_subquery.c.id))
-            ).delete(synchronize_session=False)
-            deleted_variants = db.query(ProductVariant).filter(
-                ProductVariant.product_id == product_id,
-                ProductVariant.store_id == store_id,
-            ).delete(synchronize_session=False)
-            deleted_stones = db.query(ProductStone).filter(ProductStone.product_id == product_id).delete(synchronize_session=False)
-            deleted_collections = db.query(ProductCollection).filter(ProductCollection.product_id == product_id).delete(synchronize_session=False)
-            deleted_tags = db.query(ProductTag).filter(ProductTag.product_id == product_id).delete(synchronize_session=False)
-            deleted_attributes = db.query(ProductAttribute).filter(ProductAttribute.product_id == product_id).delete(synchronize_session=False)
-
-            deleted_dependencies_count = (
-                deleted_sales
-                + deleted_images
-                + deleted_variants
-                + deleted_stones
-                + deleted_collections
-                + deleted_tags
-                + deleted_attributes
-            )
-
-            logger.info(
-                "delete_product product_id=%s store_id=%s deleted_dependencies_count=%s",
-                product_id,
-                store_id,
-                deleted_dependencies_count,
-            )
-
-            AdminManagementRepository.delete_product(db, product)
+            product.deleted_at = func.now()
+            logger.info("delete_product (soft) product_id=%s store_id=%s", product_id, store_id)
             db.commit()
         except Exception:
             db.rollback()
