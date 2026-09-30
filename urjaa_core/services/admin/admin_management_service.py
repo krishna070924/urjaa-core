@@ -608,10 +608,17 @@ class AdminManagementService:
                 errors.append({"row_number": row_index, "errors": row_errors})
                 continue
 
+            # H-10: CSV only carries the legacy triad, never metal_id itself --
+            # resolve it the same way a legacy-only API request does (D25).
+            parsed_metal_id = AdminManagementService._resolve_metal_id_from_legacy(
+                db, parsed_base_metal_id, parsed_metal_color_id, parsed_metal_purity_id
+            )
+
             normalized_rows.append(
                 {
                     "product_slug": product_slug,
                     "variant": {
+                        "metal_id": parsed_metal_id,
                         "base_metal_id": parsed_base_metal_id,
                         "metal_color_id": parsed_metal_color_id,
                         "metal_purity_id": parsed_metal_purity_id,
@@ -659,6 +666,7 @@ class AdminManagementService:
                 variant = ProductVariant(
                     store_id=store_id,
                     product_id=product.id,
+                    metal_id=variant_payload["metal_id"],
                     base_metal_id=variant_payload["base_metal_id"],
                     metal_color_id=variant_payload["metal_color_id"],
                     metal_purity_id=variant_payload["metal_purity_id"],
@@ -2203,6 +2211,48 @@ class AdminManagementService:
             )
 
     @staticmethod
+    def _resolve_metal_id_from_legacy(
+        db: Session, base_metal_id: int | None, metal_color_id: int | None, metal_purity_id: int | None
+    ) -> int | None:
+        """D25/H-10: if a legacy (base metal, colour, purity) triad names an
+        existing `metals` row, resolve its id so metal_id stays in sync with
+        legacy-only writes -- readers already prefer metal_id over the legacy
+        columns (H-07). Any leg missing, or no such combination yet, -> None;
+        legacy-only data keeps working unchanged."""
+        if base_metal_id is None or metal_color_id is None or metal_purity_id is None:
+            return None
+        matches = AdminManagementRepository.get_metals_by_selectors(
+            db, base_metal_id, [metal_color_id], [metal_purity_id]
+        )
+        return matches[0].id if matches else None
+
+    @staticmethod
+    def _resolve_and_validate_metal_id(
+        db: Session,
+        metal_id: int,
+        base_metal_id: int | None,
+        metal_color_id: int | None,
+        metal_purity_id: int | None,
+    ) -> Metal:
+        """H-10: metal_id must reference a real `metals` row (404 otherwise);
+        if the request ALSO names legacy ids, they must agree with that row's
+        own combination or the request is ambiguous (422) rather than one
+        side silently winning."""
+        metal = AdminManagementRepository.get_metal_by_id(db, metal_id)
+        if metal is None:
+            raise HTTPException(status_code=404, detail="Metal combination not found")
+        if (
+            (base_metal_id is not None and base_metal_id != metal.base_metal_id)
+            or (metal_color_id is not None and metal_color_id != metal.metal_color_id)
+            or (metal_purity_id is not None and metal_purity_id != metal.metal_purity_id)
+        ):
+            raise HTTPException(
+                status_code=422,
+                detail="metal_id does not match the given base_metal_id/metal_color_id/metal_purity_id",
+            )
+        return metal
+
+    @staticmethod
     def create_variant(
         db: Session,
         store_id: UUID,
@@ -2240,13 +2290,35 @@ class AdminManagementService:
             if not metal_purity:
                 raise HTTPException(status_code=404, detail="Metal purity not found")
 
+        # H-10: metal_id given -> validate it and let it win, writing the
+        # legacy ids from the Metal row so old readers stay consistent.
+        # Otherwise, a full legacy triad resolves metal_id if that
+        # combination already exists (D25); partial/absent legacy ids leave
+        # metal_id null, unchanged from before this ticket.
+        resolved_base_metal_id = payload.base_metal_id
+        resolved_metal_color_id = payload.metal_color_id
+        resolved_metal_purity_id = payload.metal_purity_id
+        if payload.metal_id is not None:
+            metal = AdminManagementService._resolve_and_validate_metal_id(
+                db, payload.metal_id, payload.base_metal_id, payload.metal_color_id, payload.metal_purity_id
+            )
+            resolved_metal_id = metal.id
+            resolved_base_metal_id = metal.base_metal_id
+            resolved_metal_color_id = metal.metal_color_id
+            resolved_metal_purity_id = metal.metal_purity_id
+        else:
+            resolved_metal_id = AdminManagementService._resolve_metal_id_from_legacy(
+                db, payload.base_metal_id, payload.metal_color_id, payload.metal_purity_id
+            )
+
         variant = ProductVariant(
             store_id=store_id,
             product_id=product_id,
-            base_metal_id=payload.base_metal_id,
+            metal_id=resolved_metal_id,
+            base_metal_id=resolved_base_metal_id,
             metal_type=payload.metal_type or (metal_type.name if metal_type else None),
-            metal_color_id=payload.metal_color_id,
-            metal_purity_id=payload.metal_purity_id,
+            metal_color_id=resolved_metal_color_id,
+            metal_purity_id=resolved_metal_purity_id,
             weight=payload.weight if payload.weight is not None else payload.metal_weight_grams,
             metal_weight_grams=payload.metal_weight_grams if payload.metal_weight_grams is not None else payload.weight,
             stone_quantity=payload.stone_quantity,
@@ -2258,6 +2330,8 @@ class AdminManagementService:
             sku_code=sku_code,
             internal_notes=payload.internal_notes,
             huid_number=payload.huid_number,
+            size_value=payload.size_value,
+            spec_note=payload.spec_note,
         )
 
         try:
@@ -2334,6 +2408,8 @@ class AdminManagementService:
             "sku_code",
             "internal_notes",
             "huid_number",
+            "size_value",
+            "spec_note",
         ]:
             value = getattr(payload, field)
             if value is not None:
@@ -2343,6 +2419,30 @@ class AdminManagementService:
             variant.metal_weight_grams = payload.weight
         if payload.metal_weight_grams is not None and payload.weight is None:
             variant.weight = payload.metal_weight_grams
+
+        # H-10: metal_id given -> validate + let it win, overwriting the
+        # legacy ids from the Metal row (they may already be set above to the
+        # same values; this is what keeps them consistent when metal_id is
+        # the only metal field in the request). Otherwise, if this request's
+        # own legacy ids form a full triad, resolve metal_id from it -- same
+        # combination-or-null rule as create_variant. A request that touches
+        # neither leaves metal_id untouched.
+        if payload.metal_id is not None:
+            metal = AdminManagementService._resolve_and_validate_metal_id(
+                db, payload.metal_id, payload.base_metal_id, payload.metal_color_id, payload.metal_purity_id
+            )
+            variant.metal_id = metal.id
+            variant.base_metal_id = metal.base_metal_id
+            variant.metal_color_id = metal.metal_color_id
+            variant.metal_purity_id = metal.metal_purity_id
+        elif (
+            payload.base_metal_id is not None
+            and payload.metal_color_id is not None
+            and payload.metal_purity_id is not None
+        ):
+            variant.metal_id = AdminManagementService._resolve_metal_id_from_legacy(
+                db, payload.base_metal_id, payload.metal_color_id, payload.metal_purity_id
+            )
 
         try:
             AdminManagementRepository.replace_variant_attributes(
@@ -2602,6 +2702,8 @@ class AdminManagementService:
                 "stone_id": item.stone_id,
                 "quantity": item.quantity,
                 "total_carat_weight": item.total_carat_weight,
+                # H-10: row total, used by pricing_service._stone_cost.
+                "cost": item.cost,
                 # H-05: certification fields folded back from the admin-backend
                 # B-02 local patch -- StoneAssignmentItem carries them now.
                 "cut": item.cut,

@@ -1062,6 +1062,8 @@ class AdminManagementRepository:
                     stone_id=stone["stone_id"],
                     quantity=stone.get("quantity"),
                     total_carat_weight=stone.get("total_carat_weight"),
+                    # H-10: row total cost (pricing_service._stone_cost sums these).
+                    cost=stone.get("cost"),
                     # H-05: folded back from the admin-backend's B-02 local patch.
                     cut=stone.get("cut"),
                     clarity=stone.get("clarity"),

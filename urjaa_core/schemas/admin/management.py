@@ -1,3 +1,4 @@
+from decimal import Decimal
 from typing import Annotated, Literal
 from datetime import date, datetime
 from uuid import UUID
@@ -57,6 +58,10 @@ class VariantCreateRequest(BaseModel):
     metal_type: str | None = Field(default=None, min_length=1, max_length=50)
     metal_color_id: int | None = Field(default=None, gt=0)
     metal_purity_id: int | None = Field(default=None, gt=0)
+    # D25/H-10: the combination FK. May be given instead of, or alongside, the
+    # three legacy ids above -- the service resolves/validates one against the
+    # other (additive-first; legacy columns drop later per H-06).
+    metal_id: int | None = Field(default=None, gt=0)
     weight: float | None = Field(default=None, gt=0)
     metal_weight_grams: float | None = Field(default=None, ge=0)
     stone_quantity: int | None = Field(default=0, ge=0)
@@ -69,6 +74,15 @@ class VariantCreateRequest(BaseModel):
     sku_code: str | None = Field(default=None, max_length=100)
     internal_notes: str | None = Field(default=None)
     huid_number: str | None = Field(default=None, max_length=50)
+    # D21/H-10: the one variation dimension (ring size, length, ...).
+    size_value: str | None = Field(default=None, max_length=50)
+    # H-10: one-off descriptor, display-only.
+    spec_note: str | None = Field(default=None, max_length=200)
+
+    @field_validator("size_value")
+    @classmethod
+    def _strip_size_value(cls, v: str | None) -> str | None:
+        return (v.strip() or None) if v is not None else None
 
 
 class VariantUpdateRequest(BaseModel):
@@ -77,6 +91,7 @@ class VariantUpdateRequest(BaseModel):
     metal_type: str | None = Field(default=None, min_length=1, max_length=50)
     metal_color_id: int | None = Field(default=None, gt=0)
     metal_purity_id: int | None = Field(default=None, gt=0)
+    metal_id: int | None = Field(default=None, gt=0)
     weight: float | None = Field(default=None, gt=0)
     metal_weight_grams: float | None = Field(default=None, ge=0)
     stone_quantity: int | None = Field(default=None, ge=0)
@@ -88,6 +103,13 @@ class VariantUpdateRequest(BaseModel):
     sku_code: str | None = Field(default=None, min_length=1, max_length=100)
     internal_notes: str | None = Field(default=None)
     huid_number: str | None = Field(default=None, max_length=50)
+    size_value: str | None = Field(default=None, max_length=50)
+    spec_note: str | None = Field(default=None, max_length=200)
+
+    @field_validator("size_value")
+    @classmethod
+    def _strip_size_value(cls, v: str | None) -> str | None:
+        return (v.strip() or None) if v is not None else None
 
 
 class ImageCreateRequest(BaseModel):
@@ -109,6 +131,9 @@ class StoneAssignmentItem(BaseModel):
     stone_id: int = Field(gt=0)
     quantity: int | None = Field(default=None, ge=0)
     total_carat_weight: float | None = Field(default=None, ge=0)
+    # H-10: this row's stones, in total (quantity x unit price) -- see
+    # product_stones.cost / pricing_service._stone_cost.
+    cost: Decimal | None = Field(default=None, ge=0, decimal_places=2)
     # H-05: folded back from urjaa-admin-backend's local B-02 extension now
     # that core isn't locked -- hand-entered certification (D13), all
     # nullable (D3), never required to create a product or variant.
@@ -517,6 +542,8 @@ class AdminStoneRelationItem(BaseModel):
     stone_id: int
     quantity: int | None
     total_carat_weight: float | None
+    # H-10: row total cost, persisted on product_stones.cost.
+    cost: float | None = None
     # H-05: folded back from the admin-backend's local B-02 extension.
     cut: str | None = None
     clarity: str | None = None
