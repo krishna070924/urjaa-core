@@ -15,8 +15,6 @@ class Subcategory(Base):
 
     slug = Column(String(150), unique=True, nullable=False)
 
-    default_variant_type_id = Column(Integer, ForeignKey("variant_types.id"), nullable=True)
-
     # D21: what this category's single variation dimension is called, and in
     # what unit — e.g. ("Length", "inches"), ("Ring Size", "US"),
     # ("Diameter", "mm"). Both null means this category does not vary by size,
@@ -25,4 +23,3 @@ class Subcategory(Base):
     size_unit = Column(String(20), nullable=True)
 
     category = relationship("Category")
-    default_variant_type = relationship("VariantType")

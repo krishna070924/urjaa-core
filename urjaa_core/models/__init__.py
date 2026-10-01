@@ -3,9 +3,6 @@ from .subcategory import Subcategory
 from .category import Category
 
 from .product_variant import ProductVariant
-from .variant_type import VariantType
-from .variant_type_attribute import VariantTypeAttribute
-from .variant_attribute import VariantAttribute
 from .metal_type import MetalType
 from .base_metal import BaseMetal
 from .metal_color import MetalColor
@@ -18,9 +15,6 @@ from .metal_rate import MetalRate
 
 from .stone import Stone
 from .product_stone import ProductStone
-from .attribute import Attribute
-from .attribute_value import AttributeValue
-from .product_attribute import ProductAttribute
 from .collection import Collection
 from .product_collection import ProductCollection
 from .tag import Tag

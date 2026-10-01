@@ -72,8 +72,6 @@ class ProductVariant(Base):
     metal_color = relationship("MetalColor")
     metal_purity = relationship("MetalPurity")
 
-    attribute_values = relationship("VariantAttribute", back_populates="variant")
-
     @property
     def attribute_label(self) -> str | None:
         """Display label for this variant's variation, e.g. "Ring Size 6" or

@@ -63,9 +63,7 @@ class Product(Base):
 
     stones = relationship("ProductStone", back_populates="product")
 
-    attributes = relationship("ProductAttribute", back_populates="product")
-
-    collections = relationship("Collection", secondary="product_collections", 
+    collections = relationship("Collection", secondary="product_collections",
                                back_populates="products")
     
     tags = relationship("Tag", secondary="product_tags", 
