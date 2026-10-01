@@ -44,7 +44,7 @@ def test_known_constraint_via_message_fallback():
 
 def test_duplicate_sku_maps_to_readable_message():
     exc = IntegrityError("stmt", {}, OrigStub(constraint_name="product_variants_sku_code_key"))
-    assert _detail(exc) == "Variant SKU already exists"
+    assert _detail(exc) == "That SKU is already used by another item. Change it, or leave SKU blank to generate one."
 
 
 def test_unmapped_constraint_falls_back_to_generic_message():
