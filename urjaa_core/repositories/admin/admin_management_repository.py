@@ -443,15 +443,32 @@ class AdminManagementRepository:
 
     @staticmethod
     def get_metal_colors(db: Session) -> list[MetalColor]:
-        return db.query(MetalColor).order_by(MetalColor.name.asc()).all()
+        return (
+            db.query(MetalColor)
+            .options(selectinload(MetalColor.base_metal))
+            .order_by(MetalColor.base_metal_id.asc(), MetalColor.name.asc())
+            .all()
+        )
 
     @staticmethod
     def get_metal_color_by_id(db: Session, metal_color_id: int) -> MetalColor | None:
-        return db.query(MetalColor).filter(MetalColor.id == metal_color_id).first()
+        return (
+            db.query(MetalColor)
+            .options(selectinload(MetalColor.base_metal))
+            .filter(MetalColor.id == metal_color_id)
+            .first()
+        )
 
     @staticmethod
-    def get_metal_color_by_name(db: Session, name: str) -> MetalColor | None:
-        return db.query(MetalColor).filter(func.lower(MetalColor.name) == name.lower()).first()
+    def get_metal_color_by_name(db: Session, name: str, base_metal_id: int | None) -> MetalColor | None:
+        # K-02 / D23: uniqueness is scoped to the base metal, not global — the
+        # same colour name (e.g. "White") is valid under two different base
+        # metals, mirroring how MetalPurity scopes on (base_metal_id, label).
+        return (
+            db.query(MetalColor)
+            .filter(func.lower(MetalColor.name) == name.lower(), MetalColor.base_metal_id == base_metal_id)
+            .first()
+        )
 
     @staticmethod
     def create_metal_color(db: Session, metal_color: MetalColor) -> MetalColor:
