@@ -48,8 +48,29 @@ class CheckoutService:
 
         item_store_ids: list[str] = []
 
+        # K-03: resolve discounts for every product on the order in one query —
+        # this is also what sets the amount the Razorpay payment order charges
+        # (create-payment-order reads order.total_amount), so it must match the
+        # discounted price, same as the cart/registered-user flow.
+        products_by_id = {
+            product.id: product
+            for product in db.query(Product).filter(Product.id.in_({i.product_id for i in payload.items})).all()
+        }
+        variants_by_id = {
+            variant.id: variant
+            for variant in db.query(ProductVariant)
+            .filter(ProductVariant.id.in_({i.variant_id for i in payload.items}))
+            .with_for_update()
+            .all()
+        }
+        discount_map = PricingService.resolve_best_discounts(
+            db,
+            store_ids={v.store_id for v in variants_by_id.values()},
+            product_ids=set(products_by_id.keys()),
+        )
+
         for item in payload.items:
-            product = db.query(Product).filter(Product.id == item.product_id).first()
+            product = products_by_id.get(item.product_id)
             if not product:
                 raise HTTPException(status_code=404, detail=f"Product not found: {item.product_id}")
 
@@ -60,12 +81,8 @@ class CheckoutService:
             # before checking stock. This matches the pattern used in OrderService.create_order_from_cart
             # and prevents the race condition where two concurrent guest checkouts for the same
             # last-in-stock item both pass the stock check and both create confirmed orders (overselling).
-            variant = (
-                db.query(ProductVariant)
-                .filter(ProductVariant.id == item.variant_id)
-                .with_for_update()
-                .first()
-            )
+            # (Locked in the batch query above, same pattern as create_order_from_cart.)
+            variant = variants_by_id.get(item.variant_id)
             if not variant:
                 raise HTTPException(status_code=404, detail=f"Variant not found: {item.variant_id}")
 
@@ -78,7 +95,11 @@ class CheckoutService:
 
             item_store_ids.append(str(item_store_id))
 
-            unit_price = PricingService.calculate_variant_price(variant, db)
+            # K-03/D27: the discounted FINAL price — this is what order.total_amount
+            # (and therefore the Razorpay payment order) charges, so it must match
+            # what the shopper was shown.
+            priced = PricingService.price_variant(variant, db, discount_map=discount_map)
+            unit_price = priced.price
             # URJ-066: never create a mispriced order. A missing metal rate now
             # returns None from pricing (instead of raising); checkout must still
             # hard-fail with a clear, transient error rather than proceed.
@@ -126,6 +147,8 @@ class CheckoutService:
                     quantity=item.quantity,
                     unit_price=unit_price,
                     line_total=line_total,
+                    original_unit_price=priced.original_price,
+                    discount_percent=priced.discount_percent,
                 )
             )
 

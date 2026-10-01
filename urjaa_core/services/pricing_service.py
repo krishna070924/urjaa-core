@@ -1,8 +1,14 @@
 import logging
 import threading
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from decimal import ROUND_HALF_UP, Decimal
+from typing import NamedTuple
+from uuid import UUID
 
+from sqlalchemy import and_, or_
+
+from urjaa_core.models.discount import Discount
+from urjaa_core.models.discount_product import DiscountProduct
 from urjaa_core.models.metal_purity import MetalPurity
 from urjaa_core.repositories.metal_rate_repository import MetalRateRepository
 
@@ -100,7 +106,139 @@ def _report_pricing_fallback(variant, base_metal_id) -> None:
             pass
 
 
+# K-03 (D27-D29): a discount reduces the WHOLE computed price (metal + stones
+# + making, or price_override -- i.e. exactly what calculate_variant_price
+# returns) by a flat percentage, scoped to one store, optionally windowed by
+# date, and never stacked -- the highest percent among the discounts that
+# apply to a product wins.
+class BestDiscount(NamedTuple):
+    percent: Decimal
+    ends_at: datetime | None
+
+
+class PricedAmount(NamedTuple):
+    """Result of pricing one variant/product: final price plus the discount
+    that produced it, if any. `price` is the FINAL price (what's charged and
+    shown); `original_price` is only set when a discount was applied."""
+
+    price: Decimal | None
+    original_price: Decimal | None
+    discount_percent: Decimal | None
+    discount_ends_at: datetime | None
+
+
+def _discount_window_filter(now: datetime):
+    return and_(
+        Discount.is_active.is_(True),
+        or_(Discount.starts_at.is_(None), Discount.starts_at <= now),
+        or_(Discount.ends_at.is_(None), Discount.ends_at > now),
+    )
+
+
 class PricingService:
+
+    @staticmethod
+    def resolve_best_discounts(
+        db,
+        *,
+        store_ids,
+        product_ids,
+        now: datetime | None = None,
+    ) -> dict[tuple[UUID, UUID], BestDiscount]:
+        """Best active discount per (store_id, product_id), in at most two
+        queries regardless of how many products are asked for -- avoids N+1
+        when pricing a product list or a multi-item cart/order.
+        """
+        store_ids = {s for s in store_ids if s is not None}
+        product_ids = {p for p in product_ids if p is not None}
+        if not store_ids or not product_ids:
+            return {}
+
+        now = now or datetime.now(timezone.utc)
+        window = _discount_window_filter(now)
+        best: dict[tuple[UUID, UUID], BestDiscount] = {}
+
+        def _consider(store_id, product_id, percent: Decimal, ends_at: datetime | None) -> None:
+            key = (store_id, product_id)
+            current = best.get(key)
+            if current is None or percent > current.percent:
+                best[key] = BestDiscount(percent=percent, ends_at=ends_at)
+
+        store_wide = (
+            db.query(Discount.store_id, Discount.percent, Discount.ends_at)
+            .filter(window, Discount.applies_to_all.is_(True), Discount.store_id.in_(store_ids))
+            .all()
+        )
+        for store_id, percent, ends_at in store_wide:
+            for product_id in product_ids:
+                _consider(store_id, product_id, percent, ends_at)
+
+        per_product = (
+            db.query(DiscountProduct.product_id, Discount.store_id, Discount.percent, Discount.ends_at)
+            .join(Discount, Discount.id == DiscountProduct.discount_id)
+            .filter(window, Discount.store_id.in_(store_ids), DiscountProduct.product_id.in_(product_ids))
+            .all()
+        )
+        for product_id, store_id, percent, ends_at in per_product:
+            _consider(store_id, product_id, percent, ends_at)
+
+        return best
+
+    @staticmethod
+    def price_variant(
+        variant,
+        db,
+        *,
+        rate_cache: dict | None = None,
+        discount_map: dict[tuple[UUID, UUID], BestDiscount] | None = None,
+        now: datetime | None = None,
+    ) -> PricedAmount:
+        """The single pricing entry point: original price, discount percent,
+        and final price (rounded once) for one variant. A None base price
+        (Price on Request) never gets a discount."""
+        base_price = PricingService.calculate_variant_price(variant, db, rate_cache=rate_cache)
+        if base_price is None:
+            return PricedAmount(None, None, None, None)
+
+        if discount_map is None:
+            discount_map = PricingService.resolve_best_discounts(
+                db, store_ids={variant.store_id}, product_ids={variant.product_id}, now=now
+            )
+
+        match = discount_map.get((variant.store_id, variant.product_id))
+        if match is None:
+            return PricedAmount(base_price, None, None, None)
+
+        final_price = round_money(base_price * (Decimal("100") - match.percent) / Decimal("100"))
+        return PricedAmount(final_price, base_price, match.percent, match.ends_at)
+
+    @staticmethod
+    def price_product_starting(
+        product,
+        db,
+        *,
+        rate_cache: dict | None = None,
+        discount_map: dict[tuple[UUID, UUID], BestDiscount] | None = None,
+        now: datetime | None = None,
+    ) -> PricedAmount:
+        """Starting price (lowest priceable variant), discount-aware."""
+        if not product or not product.variants:
+            return PricedAmount(None, None, None, None)
+
+        if discount_map is None:
+            discount_map = PricingService.resolve_best_discounts(
+                db, store_ids={product.store_id}, product_ids={product.id}, now=now
+            )
+
+        priced = [
+            PricingService.price_variant(variant, db, rate_cache=rate_cache, discount_map=discount_map, now=now)
+            for variant in product.variants
+        ]
+        priceable = [p for p in priced if p.price is not None]
+        if not priceable:
+            return PricedAmount(None, None, None, None)
+
+        return min(priceable, key=lambda p: p.price)
 
     @staticmethod
     def calculate_variant_price(variant, db, rate_cache: dict | None = None) -> Decimal | None:

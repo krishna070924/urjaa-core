@@ -268,6 +268,15 @@ ADMIN_ROUTE_PERMISSION_RULES: list[dict[str, Any]] = [
         "methods": WRITE_METHODS,
         "any_of": {ADMIN_PERMISSION_MANAGE_PRODUCTS},
     },
+    # K-03: discounts live under the products permission, same bucket as
+    # /admin/products itself. Fail-closed table -- a route missing here 403s
+    # for every admin regardless of their permissions (see the appointments
+    # note below), so this is not optional.
+    {
+        "pattern": re.compile(r"^/admin/discounts(?:/.*)?$"),
+        "methods": WRITE_METHODS,
+        "any_of": {ADMIN_PERMISSION_MANAGE_PRODUCTS},
+    },
     {
         "pattern": re.compile(r"^/admin/images(?:/.*)?$"),
         "methods": WRITE_METHODS,
@@ -320,6 +329,11 @@ ADMIN_ROUTE_PERMISSION_RULES: list[dict[str, Any]] = [
         "pattern": re.compile(r"^/admin/variants(?:/.*)?$"),
         "methods": {"GET"},
         "any_of": {ADMIN_PERMISSION_MANAGE_PRODUCTS},
+    },
+    {
+        "pattern": re.compile(r"^/admin/discounts(?:/.*)?$"),
+        "methods": {"GET"},
+        "any_of": {ADMIN_PERMISSION_MANAGE_PRODUCTS, ADMIN_PERMISSION_MANAGE_INVENTORY},
     },
     {
         "pattern": re.compile(r"^/admin/images(?:/.*)?$"),

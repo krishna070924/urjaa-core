@@ -1,3 +1,4 @@
+from datetime import datetime
 from pydantic import BaseModel
 from uuid import UUID
 from typing import Any
@@ -22,8 +23,14 @@ class ProductImageSchema(BaseModel):
         orm_mode = True
 
 class ProductResponse(ProductBase):
+    # K-03/D27: `starting_price` (and `formatted_price`) are always the FINAL,
+    # already-discounted price. `original_price` is the pre-discount price of
+    # that same (cheapest) variant, null when it has no active discount.
     starting_price: float | None = None
     formatted_price: str = ""
+    original_price: float | None = None
+    discount_percent: float | None = None
+    discount_ends_at: datetime | None = None
     images: list[ProductImageSchema] = []   # 👈 ADD THIS
 
     class Config:
@@ -54,9 +61,13 @@ class VariantResponse(BaseModel):
     sku_code: str
     # Computed per-variant price (PricingService), product-detail only. `None`
     # means unpriceable (missing metal rate) — storefront shows "Price on
-    # Request"; never substitute 0.
+    # Request"; never substitute 0. `price` is always the FINAL (discounted)
+    # price (K-03/D27); `original_price` is null when there's no discount.
     price: float | None = None
     formatted_price: str = ""
+    original_price: float | None = None
+    discount_percent: float | None = None
+    discount_ends_at: datetime | None = None
 
     class Config:
         orm_mode = True
@@ -84,6 +95,9 @@ class ProductDetailResponse(ProductBase):
     status: str
     starting_price: float | None = None
     formatted_price: str = ""
+    original_price: float | None = None
+    discount_percent: float | None = None
+    discount_ends_at: datetime | None = None
     # J-01: what the subcategory calls its size dimension, and its unit. Both
     # null means this product's category doesn't vary by size — the storefront
     # hides the size picker entirely rather than showing an empty one.

@@ -66,20 +66,30 @@ class SearchService:
             if pid in product_map
         ]
 
-        # Request-scoped cache to avoid repeated metal rate lookups per variant
+        # Request-scoped caches to avoid repeated metal rate / discount lookups.
         rate_cache = {}
+        discount_map = PricingService.resolve_best_discounts(
+            db,
+            store_ids={product.store_id for product in ordered_products},
+            product_ids={product.id for product in ordered_products},
+        )
 
         # -----------------------------
         # Attach pricing
         # -----------------------------
         for product in ordered_products:
-            product.starting_price = PricingService.calculate_product_starting_price(
-                product,
-                db,
-                rate_cache=rate_cache,
+            # K-03: same discount-aware pricing as the catalog list (§5.5) —
+            # search results share the same ProductResponse shape, so the price
+            # shown here must match what /products and checkout would charge.
+            priced = PricingService.price_product_starting(
+                product, db, rate_cache=rate_cache, discount_map=discount_map,
             )
+            product.starting_price = priced.price
             # URJ-066: an unpriceable search hit renders "Price on Request", matching
             # the catalog list / PDP read paths (not a blank price).
             product.formatted_price = format_price_or_request(product.starting_price)
+            product.original_price = priced.original_price
+            product.discount_percent = priced.discount_percent
+            product.discount_ends_at = priced.discount_ends_at
 
         return ordered_products, total

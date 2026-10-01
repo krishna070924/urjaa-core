@@ -22,6 +22,11 @@ class OrderItem(Base):
     unit_price = Column(Numeric(12, 2), nullable=False)
     line_total = Column(Numeric(12, 2), nullable=False)
 
+    # K-03: discount audit snapshot. Null when the line had no discount applied.
+    # unit_price above is already the discounted (final) price actually charged.
+    original_unit_price = Column(Numeric(12, 2), nullable=True)
+    discount_percent = Column(Numeric(5, 2), nullable=True)
+
     order = relationship("Order", back_populates="items")
     store = relationship("Store")
     product = relationship("Product")
