@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session, selectinload
 from urjaa_core.models.base_metal import BaseMetal
 from urjaa_core.models.category import Category
 from urjaa_core.models.collection import Collection
+from urjaa_core.models.gender import Gender
 from urjaa_core.models.metal import Metal
 from urjaa_core.models.metal_color import MetalColor
 from urjaa_core.models.metal_purity import MetalPurity
@@ -320,6 +321,10 @@ class AdminManagementRepository:
             .order_by(Subcategory.name.asc())
             .all()
         )
+
+    @staticmethod
+    def get_genders(db: Session) -> list[Gender]:
+        return db.query(Gender).order_by(Gender.name.asc()).all()
 
     @staticmethod
     def get_subcategory_by_slug(db: Session, slug: str) -> Subcategory | None:

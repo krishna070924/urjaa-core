@@ -4,13 +4,18 @@ Generates the unified bulk-upload Excel template for products.
 Sheet layout:
   1. products  – one row per product (human-readable names; slug auto-generated)
   2. variants  – one row per variant linked by product_name
-  3. instructions – field reference with descriptions and allowed values
+  3. instructions – field reference plus the current valid categories,
+     subcategories, metal combinations and genders, read from the DB at
+     download time so staff always see what's actually in the catalog (K-01).
 """
 
 import io
 import openpyxl
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
+from sqlalchemy.orm import Session
+
+from urjaa_core.repositories.admin.admin_management_repository import AdminManagementRepository
 
 
 _GOLD = "C9A14A"
@@ -59,6 +64,7 @@ PRODUCT_COLUMNS = [
     ("product_name",    True,  "Gold Filigree Necklace",         "Unique display name; slug is auto-generated"),
     ("category_name",   True,  "Necklaces",                       "Exact category name as shown in your catalog (case-insensitive)"),
     ("subcategory_name",False, "Choker Necklaces",                "Subcategory name under the given category (optional)"),
+    ("gender",          False, "unisex",                          "men | women | unisex | kids (case-insensitive; default: unisex)"),
     ("description",     False, "Handcrafted 22K gold necklace.",  "Short plain-text description"),
     ("status",          False, "active",                          "active | draft | archived  (default: draft)"),
     ("featured",        False, "false",                           "true | false  (default: false)"),
@@ -68,13 +74,14 @@ PRODUCT_COLUMNS = [
 # Variants sheet — one or more rows per product (linked by product_name)
 VARIANT_COLUMNS = [
     ("product_name",       True,  "Gold Filigree Necklace",  "Must exactly match a product_name in the Products sheet"),
-    ("variant_sku",        True,  "GFN-22K-16IN",            "Unique SKU code for this variant"),
-    ("stock_quantity",     False, "10",                      "Integer >= 0  (default: 0)"),
-    ("price_override",     False, "5500",                    "Fixed price in INR; overrides metal-rate computation if set"),
+    ("variant_sku",        False, "GFN-22K-16IN",            "Leave blank to auto-generate a SKU"),
+    ("metal",              False, "22K Yellow Gold",         "Exact metal combination name from your catalog (case-insensitive) — see VALID METAL COMBINATIONS below"),
+    ("size_value",         False, "6",                       "Size/length value, in the unit the subcategory uses — see VALID SUBCATEGORIES below. Leave blank if the subcategory has no size"),
+    ("spec_note",          False, "Engraved initials",       "One-off display note, max 200 characters"),
     ("metal_weight_grams", False, "8.5",                     "Decimal grams of metal (used in computed price)"),
     ("making_charges",     False, "1500",                    "Fixed making charge in INR"),
-    ("stone_cost",         False, "500",                     "Fixed stone cost in INR"),
-    ("base_metal_id",      False, "1",                       "Numeric ID of base metal from your catalog"),
+    ("price_override",     False, "5500",                    "Fixed price in INR; overrides metal-rate computation if set"),
+    ("stock_quantity",     False, "10",                      "Integer >= 0  (default: 0)"),
 ]
 
 
@@ -95,7 +102,7 @@ def _build_products_sheet(wb: openpyxl.Workbook):
         cell = ws.cell(row=2, column=col_idx)
         _example_cell(cell, example)
 
-    _set_col_widths(ws, [30, 26, 26, 44, 10, 10, 14])
+    _set_col_widths(ws, [30, 26, 26, 14, 44, 10, 10, 14])
     return ws
 
 
@@ -114,11 +121,11 @@ def _build_variants_sheet(wb: openpyxl.Workbook):
         cell = ws.cell(row=2, column=col_idx)
         _example_cell(cell, example)
 
-    _set_col_widths(ws, [30, 18, 14, 16, 20, 18, 14, 16])
+    _set_col_widths(ws, [30, 18, 20, 14, 24, 20, 18, 16, 14])
     return ws
 
 
-def _build_instructions_sheet(wb: openpyxl.Workbook):
+def _build_instructions_sheet(wb: openpyxl.Workbook, db: Session):
     ws = wb.create_sheet("instructions")
     ws.sheet_view.showGridLines = False
     ws.column_dimensions["A"].width = 24
@@ -152,6 +159,12 @@ def _build_instructions_sheet(wb: openpyxl.Workbook):
         ws.cell(row=row, column=4, value=f"e.g.  {example}" if example else "").font = _EXAMPLE_FONT
         ws.row_dimensions[row].height = 18
 
+    def _list_row(row, value, note=""):
+        ws.cell(row=row, column=1, value=value).font = Font(color="C9A14A", size=9)
+        if note:
+            ws.cell(row=row, column=3, value=note).font = _BODY_FONT
+        ws.row_dimensions[row].height = 16
+
     r = 1
     _title(r, "BULK UPLOAD — FIELD REFERENCE")
     r += 1
@@ -169,8 +182,11 @@ def _build_instructions_sheet(wb: openpyxl.Workbook):
         "Export the 'products' sheet as CSV before uploading (File → Save As → CSV).",
         "category_name must match a name in your catalog exactly (case-insensitive). No slug needed.",
         "subcategory_name is optional. If given, it must belong to the specified category.",
+        "gender is optional — men, women, unisex or kids (case-insensitive). Leave blank for unisex.",
         "Product slug is auto-generated from product_name — never provide a slug column.",
-        "variant_sku must be globally unique across all stores.",
+        "variant_sku is optional — leave blank to auto-generate one; must be globally unique if given.",
+        "metal must match a metal combination's display name exactly (case-insensitive), e.g. \"22K Yellow Gold\" — see VALID METAL COMBINATIONS below.",
+        "size_value only applies to subcategories with a size label configured — see VALID SUBCATEGORIES below.",
         "Rows with the same product_name create variants of the same product.",
         "Use price_override to set a fixed price; leave blank to compute via metal rate.",
     ]
@@ -208,16 +224,68 @@ def _build_instructions_sheet(wb: openpyxl.Workbook):
         ws.row_dimensions[r].height = 16
         r += 1
 
+    # K-01: the current catalog, read live so staff never fill in a name that
+    # no longer exists.
+    r += 1
+    _section(r, "VALID GENDERS")
+    r += 1
+    for gender in AdminManagementRepository.get_genders(db):
+        _list_row(r, gender.name)
+        r += 1
 
-def generate_product_template() -> bytes:
-    """Return the unified product bulk-upload Excel template as raw bytes."""
+    r += 1
+    _section(r, "VALID CATEGORIES")
+    r += 1
+    categories = AdminManagementRepository.get_categories(db)
+    for category in categories:
+        _list_row(r, category.name)
+        r += 1
+    if not categories:
+        _list_row(r, "(none configured yet)")
+        r += 1
+
+    r += 1
+    _section(r, "VALID SUBCATEGORIES  (category — size label / unit, if any)")
+    r += 1
+    subcategories = AdminManagementRepository.get_subcategories(db)
+    for subcategory in subcategories:
+        category_name = subcategory.category.name if subcategory.category else "?"
+        size_info = (
+            f"{subcategory.size_label} / {subcategory.size_unit}" if subcategory.size_label and subcategory.size_unit
+            else (subcategory.size_label or "no sizing")
+        )
+        _list_row(r, f"{subcategory.name}  —  {category_name}", size_info)
+        r += 1
+    if not subcategories:
+        _list_row(r, "(none configured yet)")
+        r += 1
+
+    r += 1
+    _section(r, "VALID METAL COMBINATIONS")
+    r += 1
+    metal_names = sorted({metal.display_name for metal in AdminManagementRepository.get_metals(db) if metal.display_name})
+    for name in metal_names:
+        _list_row(r, name)
+        r += 1
+    if not metal_names:
+        _list_row(r, "(none configured yet — generate combinations on the Metals admin page)")
+        r += 1
+
+
+def generate_product_template(db: Session) -> bytes:
+    """Return the unified product bulk-upload Excel template as raw bytes.
+
+    Needs a DB session (K-01): the instructions sheet lists the catalog's
+    current valid categories, subcategories, metal combinations and genders
+    as they exist at download time.
+    """
     wb = openpyxl.Workbook()
     default_sheet = wb.active
     wb.remove(default_sheet)
 
     _build_products_sheet(wb)
     _build_variants_sheet(wb)
-    _build_instructions_sheet(wb)
+    _build_instructions_sheet(wb, db)
 
     buf = io.BytesIO()
     wb.save(buf)
