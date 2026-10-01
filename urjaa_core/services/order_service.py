@@ -166,6 +166,14 @@ class OrderService:
         total_cost_amount = Decimal("0")
         order_items: list[OrderItem] = []
         rate_cache: dict[int, object] = {}
+        # K-03: one batch lookup for every product in the cart (not one query
+        # per line) — the amount charged (order.total_amount, later the
+        # Razorpay amount) must match the discounted price shown in the cart.
+        discount_map = PricingService.resolve_best_discounts(
+            db,
+            store_ids={v.store_id for v in locked_variants},
+            product_ids={item.product_id for item in cart_items},
+        )
 
         for cart_item in cart_items:
             product = cart_item.product
@@ -198,15 +206,19 @@ class OrderService:
             # URJ-066: never create a mispriced order. Pricing returns None on a
             # missing metal rate; order creation must hard-fail cleanly instead of
             # crashing on float(None) or snapshotting a wrong price.
-            raw_price = PricingService.calculate_variant_price(variant, db, rate_cache=rate_cache)
-            if raw_price is None:
+            # K-03/D27: priced.price is the discounted FINAL price — this is what
+            # gets charged (order.total_amount -> Razorpay amount), matching what
+            # the cart showed. priced.original_price/discount_percent are None
+            # when no discount applied; snapshotted on the order item for audit.
+            priced = PricingService.price_variant(variant, db, rate_cache=rate_cache, discount_map=discount_map)
+            if priced.price is None:
                 raise HTTPException(
                     status_code=503,
                     detail=f"Pricing is temporarily unavailable for {product.name}. Please try again shortly.",
                 )
-            # raw_price is already a Decimal rounded once at calculate_variant_price's
-            # "price of one unit" boundary — no float cast, no re-round needed here.
-            unit_price = raw_price
+            # Already a Decimal rounded once at its pricing boundary — no float
+            # cast, no re-round needed here.
+            unit_price = priced.price
             if unit_price <= 0:
                 raise HTTPException(status_code=400, detail=f"Unable to compute price for {product.name}")
 
@@ -240,6 +252,8 @@ class OrderService:
                     quantity=requested_quantity,
                     unit_price=unit_price,
                     line_total=line_total,
+                    original_unit_price=priced.original_price,
+                    discount_percent=priced.discount_percent,
                 )
             )
 

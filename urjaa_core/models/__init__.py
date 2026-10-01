@@ -23,6 +23,8 @@ from .product_image import ProductImage
 from .sale import Sale
 from .order import Order
 from .order_item import OrderItem
+from .discount import Discount
+from .discount_product import DiscountProduct
 from .payment_transaction import PaymentTransaction
 from .store import Store
 from .store_location import StoreLocation

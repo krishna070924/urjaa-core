@@ -86,11 +86,22 @@ class CartService:
         has_unpriceable_items = False
         rate_cache: dict = {}
 
+        discount_map = PricingService.resolve_best_discounts(
+            db,
+            store_ids={item.variant.store_id for item in cart_items},
+            product_ids={item.product_id for item in cart_items},
+        )
+
         for item in cart_items:
             # URJ-066: a missing metal rate must not 503 the whole cart. The line is
             # flagged unpriceable (null prices, is_priced=False) and left out of the
             # subtotal; the storefront blocks checkout for it.
-            raw_price = PricingService.calculate_variant_price(item.variant, db, rate_cache=rate_cache)
+            # K-03/D27: price_variant already returns the discounted FINAL price —
+            # the cart (and therefore checkout/Razorpay) must charge this, not the
+            # pre-discount amount.
+            raw_price = PricingService.price_variant(
+                item.variant, db, rate_cache=rate_cache, discount_map=discount_map
+            ).price
 
             if raw_price is None:
                 has_unpriceable_items = True

@@ -85,18 +85,27 @@ class ProductService:
             attributes=attributes,
         )
 
-        # Request-scoped cache for metal rates to reduce repeated DB reads
+        # Request-scoped caches: metal rates and (K-03) best-discount lookups,
+        # so pricing N products hits each once, not once per product.
         rate_cache = {}
+        discount_map = PricingService.resolve_best_discounts(
+            db,
+            store_ids={product.store_id for product in products},
+            product_ids={product.id for product in products},
+        )
 
         for product in products:
-            product.starting_price = PricingService.calculate_product_starting_price(
-                product,
-                db,
-                rate_cache=rate_cache,
+            priced = PricingService.price_product_starting(
+                product, db, rate_cache=rate_cache, discount_map=discount_map,
             )
+            product.starting_price = priced.price
             # URJ-066: a None starting price (missing metal rate) renders as
             # "Price on Request" instead of a misleading ₹0.
             product.formatted_price = format_price_or_request(product.starting_price)
+            # K-03/D27: null when there's no discount on the cheapest variant.
+            product.original_price = priced.original_price
+            product.discount_percent = priced.discount_percent
+            product.discount_ends_at = priced.discount_ends_at
 
         pages = (total + limit - 1) // limit
 
@@ -116,20 +125,29 @@ class ProductService:
 
         if product:
             # Shared across starting_price + every variant below so pricing N
-            # variants of the same metal hits the metal-rate cache once, not N times.
+            # variants of the same metal/discount hits each cache once, not N times.
             rate_cache: dict = {}
-
-            product.starting_price = PricingService.calculate_product_starting_price(
-                product,
-                db,
-                rate_cache=rate_cache,
+            discount_map = PricingService.resolve_best_discounts(
+                db, store_ids={product.store_id}, product_ids={product.id}
             )
+
+            starting = PricingService.price_product_starting(
+                product, db, rate_cache=rate_cache, discount_map=discount_map,
+            )
+            product.starting_price = starting.price
             product.formatted_price = format_price_or_request(product.starting_price)
+            product.original_price = starting.original_price
+            product.discount_percent = starting.discount_percent
+            product.discount_ends_at = starting.discount_ends_at
 
             for variant in product.variants:
-                variant.price = PricingService.calculate_variant_price(
-                    variant, db, rate_cache=rate_cache
+                priced = PricingService.price_variant(
+                    variant, db, rate_cache=rate_cache, discount_map=discount_map
                 )
+                variant.price = priced.price
                 variant.formatted_price = format_price_or_request(variant.price)
+                variant.original_price = priced.original_price
+                variant.discount_percent = priced.discount_percent
+                variant.discount_ends_at = priced.discount_ends_at
 
         return product

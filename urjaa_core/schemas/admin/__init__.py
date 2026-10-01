@@ -42,6 +42,12 @@ from .management import (
     VariantCreateRequest,
     VariantUpdateRequest,
 )
+from .discounts import (
+    AdminDiscountListResponse,
+    AdminDiscountResponse,
+    DiscountCreateRequest,
+    DiscountUpdateRequest,
+)
 from .inventory import InventoryLowStockItemResponse, InventorySummaryResponse
 from .sales import (
     AdminOrderItemResponse,

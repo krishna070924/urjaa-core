@@ -6,6 +6,7 @@ from uuid import UUID
 from pydantic import BaseModel, Field, field_validator
 
 from urjaa_core.models.product_stone import CERTIFICATION_AGENCIES
+from urjaa_core.schemas.admin.discounts import AdminDiscountResponse
 
 
 ProductStatus = Literal["draft", "active", "hidden", "archived"]
@@ -512,6 +513,9 @@ class AdminProductDetailResponse(AdminProductResponse):
     collection_ids: list[int]
     tag_ids: list[int]
     stones: list[AdminStoneRelationItem]
+    # K-03: discounts (any status) that apply to this product -- store-wide
+    # plus ones explicitly targeting it.
+    discounts: list[AdminDiscountResponse] = Field(default_factory=list)
 
 
 class MessageResponse(BaseModel):
