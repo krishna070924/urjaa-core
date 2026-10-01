@@ -17,6 +17,7 @@ from uuid import uuid4
 
 os.environ.setdefault("DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/urjaa")
 
+from fastapi import HTTPException
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
@@ -33,7 +34,7 @@ from urjaa_core.models import (
     Store,
     User,
 )
-from urjaa_core.schemas.admin.discounts import DiscountCreateRequest
+from urjaa_core.schemas.admin.discounts import DiscountCreateRequest, DiscountUpdateRequest
 from urjaa_core.services.admin.discount_service import AdminDiscountService
 from urjaa_core.services.order_service import OrderService
 from urjaa_core.services.pricing_service import PricingService, round_money
@@ -165,6 +166,25 @@ def main() -> None:
         priced_d_outside = PricingService.price_variant(variant_d, db)
         assert priced_d_outside.price == Decimal("99.99") and priced_d_outside.discount_percent is None
         print("OK scheduled (not started) and expired discounts do not apply")
+
+        # --- update: clearing an end date works; a partial update that breaks the window is a 422
+        db.execute(text("SET ROLE urjaa_admin_svc"))
+        cleared = AdminDiscountService.update_discount(
+            db, store_id=store.id, discount_id=expired["id"], payload=DiscountUpdateRequest(ends_at=None)
+        )
+        assert cleared["ends_at"] is None and cleared["status"] == "active", cleared
+        try:
+            AdminDiscountService.update_discount(
+                db, store_id=store.id, discount_id=future["id"],
+                payload=DiscountUpdateRequest(ends_at=now + timedelta(days=1)),
+            )
+            raise AssertionError("end before start accepted")
+        except HTTPException as exc:
+            assert exc.status_code == 422, exc.status_code
+        AdminDiscountService.update_discount(
+            db, store_id=store.id, discount_id=expired["id"], payload=DiscountUpdateRequest(is_active=False)
+        )
+        print("OK update can clear an end date; end-before-start on partial update -> 422")
 
         # --- final price rounding: 99.99 at 50% = 49.995 pre-round -> ROUND_HALF_UP -> 50.00
         db.execute(text("SET ROLE urjaa_admin_svc"))

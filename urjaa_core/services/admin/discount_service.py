@@ -142,7 +142,15 @@ class AdminDiscountService:
             if not name:
                 raise HTTPException(status_code=422, detail="name cannot be blank")
             discount.name = name
-        for field in ("percent", "starts_at", "ends_at", "is_active", "applies_to_all"):
+        # Dates may be cleared: an explicitly sent null removes the start/end.
+        # Validate the resulting window before touching the row.
+        fields = payload.model_fields_set
+        starts_at = payload.starts_at if "starts_at" in fields else discount.starts_at
+        ends_at = payload.ends_at if "ends_at" in fields else discount.ends_at
+        if starts_at and ends_at and ends_at <= starts_at:
+            raise HTTPException(status_code=422, detail="The end date must be after the start date")
+        discount.starts_at, discount.ends_at = starts_at, ends_at
+        for field in ("percent", "is_active", "applies_to_all"):
             value = getattr(payload, field)
             if value is not None:
                 setattr(discount, field, value)
