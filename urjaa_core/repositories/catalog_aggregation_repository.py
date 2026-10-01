@@ -23,9 +23,6 @@ from urjaa_core.models.base_metal import BaseMetal
 from urjaa_core.models.metal_color import MetalColor
 from urjaa_core.models.metal_rate import MetalRate
 from urjaa_core.models.metal_purity import MetalPurity
-from urjaa_core.models.product_attribute import ProductAttribute
-from urjaa_core.models.attribute_value import AttributeValue
-from urjaa_core.models.attribute import Attribute
 
 
 def _slugify(value: str | None) -> str:
@@ -266,48 +263,6 @@ class CatalogAggregationRepository:
             for name, count in query.all()
         ]
 
-    @staticmethod
-    def get_attribute_counts(db: Session, base_query):
-
-        query = (
-            db.query(
-                Attribute.name,
-                Attribute.slug,
-                AttributeValue.value,
-                func.count(func.distinct(base_query.c.id)),
-            )
-            .select_from(base_query)
-            .join(ProductAttribute, ProductAttribute.product_id == base_query.c.id)
-            .join(AttributeValue, AttributeValue.id == ProductAttribute.attribute_value_id)
-            .join(Attribute, Attribute.id == AttributeValue.attribute_id)
-            .filter(Attribute.filterable.is_(True))
-            .group_by(Attribute.name, Attribute.slug, AttributeValue.value)
-            .order_by(Attribute.name.asc(), AttributeValue.value.asc())
-        )
-
-        grouped: dict[str, dict] = {}
-
-        for attribute_name, attribute_slug, value, count in query.all():
-            key = attribute_slug or _slugify(attribute_name)
-            if key not in grouped:
-                grouped[key] = {
-                    "attribute": key,
-                    "label": attribute_name,
-                    "options": [],
-                }
-
-            grouped[key]["options"].append(
-                {
-                    "value": value,
-                    "slug": _slugify(value),
-                    "count": count,
-                }
-            )
-
-        attributes = list(grouped.values())
-        attributes.sort(key=lambda item: item["label"].lower())
-        return attributes
-    
     @staticmethod
     def get_price_buckets(db: Session, store_id: UUID | None, base_query):
         latest_rate_subquery = (

@@ -6,8 +6,8 @@ Covers:
 1. Subcategory size_label/size_unit round-trip through create/update
    (trimmed, blank -> None), and size_unit without size_label -> 422 on both
    create and update.
-2. Product create/update/duplicate write gender_id (D21/H-08), not a new EAV
-   gender row -- H-06 will delete those tables; nothing new should land there.
+2. Product create/update/duplicate write gender_id (D21/H-08) -- the EAV
+   tables this used to also write to are gone as of H-06.
 3. The admin API's gender response value derives correctly from gender_id
    (mirrors urjaa-admin-backend's _gender_value; that repo's own code isn't
    importable from here, so this proves the core data it reads is correct).
@@ -28,9 +28,6 @@ from sqlalchemy.orm import Session
 
 from urjaa_core.core.database import engine
 from urjaa_core.models import Category, Product, Store, Subcategory
-from urjaa_core.models.attribute import Attribute
-from urjaa_core.models.attribute_value import AttributeValue
-from urjaa_core.models.product_attribute import ProductAttribute
 from urjaa_core.repositories.catalog_aggregation_repository import CatalogAggregationRepository
 from urjaa_core.repositories.catalog_query_builder import CatalogQueryBuilder
 from urjaa_core.schemas.admin.management import (
@@ -46,16 +43,6 @@ def _gender_value(product) -> str | None:
     """Mirrors urjaa-admin-backend's app/api/routes/admin_management.py
     _gender_value (H-11)."""
     return product.gender.name.lower() if product.gender else None
-
-
-def _eav_gender_row_count(db: Session, product_id) -> int:
-    return (
-        db.query(ProductAttribute)
-        .join(AttributeValue, AttributeValue.id == ProductAttribute.attribute_value_id)
-        .join(Attribute, Attribute.id == AttributeValue.attribute_id)
-        .filter(ProductAttribute.product_id == product_id, Attribute.slug == "gender")
-        .count()
-    )
 
 
 def main() -> None:
@@ -120,8 +107,7 @@ def main() -> None:
         db.refresh(product)
         assert product.gender_id is not None and product.gender.name == "Men"
         assert _gender_value(product) == "men"
-        assert _eav_gender_row_count(db, product.id) == 0
-        print("create_product writes gender_id, no EAV row           OK")
+        print("create_product writes gender_id                       OK")
 
         updated_product = svc.update_product(
             db, store.id, product.id, ProductUpdateRequest(gender="women", status="active")
@@ -129,8 +115,7 @@ def main() -> None:
         db.refresh(updated_product)
         assert updated_product.gender.name == "Women"
         assert _gender_value(updated_product) == "women"
-        assert _eav_gender_row_count(db, product.id) == 0
-        print("update_product writes gender_id, no EAV row           OK")
+        print("update_product writes gender_id                       OK")
 
         duplicate = svc.duplicate_product(db, store.id, product.id)
         assert duplicate.gender_id == updated_product.gender_id

@@ -53,7 +53,6 @@ class ProductUpdateRequest(BaseModel):
 
 
 class VariantCreateRequest(BaseModel):
-    attribute_value_ids: list[int] = Field(default_factory=list)
     base_metal_id: int | None = Field(default=None, gt=0)
     metal_type: str | None = Field(default=None, min_length=1, max_length=50)
     metal_color_id: int | None = Field(default=None, gt=0)
@@ -86,7 +85,6 @@ class VariantCreateRequest(BaseModel):
 
 
 class VariantUpdateRequest(BaseModel):
-    attribute_value_ids: list[int] = Field(default_factory=list)
     base_metal_id: int | None = Field(default=None, gt=0)
     metal_type: str | None = Field(default=None, min_length=1, max_length=50)
     metal_color_id: int | None = Field(default=None, gt=0)
@@ -169,7 +167,6 @@ class CategoryUpdateRequest(BaseModel):
 class SubcategoryCreateRequest(BaseModel):
     category_id: int = Field(gt=0)
     name: str = Field(min_length=1, max_length=120)
-    default_variant_type_id: int | None = Field(default=None, gt=0)
     # D21/H-01: what this subcategory's single variation dimension is called,
     # and in what unit (e.g. "Ring Size" / "US"). Blank means products here
     # don't vary by size -- the service rejects a unit given without a label.
@@ -185,7 +182,6 @@ class SubcategoryCreateRequest(BaseModel):
 class SubcategoryUpdateRequest(BaseModel):
     category_id: int | None = Field(default=None, gt=0)
     name: str | None = Field(default=None, min_length=1, max_length=120)
-    default_variant_type_id: int | None = Field(default=None, gt=0)
     size_label: str | None = Field(default=None, max_length=50)
     size_unit: str | None = Field(default=None, max_length=20)
 
@@ -229,26 +225,6 @@ class StoneUpdateRequest(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=100)
 
 
-class AttributeCreateRequest(BaseModel):
-    name: str = Field(min_length=1, max_length=100)
-    filterable: bool = True
-
-
-class AttributeUpdateRequest(BaseModel):
-    name: str | None = Field(default=None, min_length=1, max_length=100)
-    filterable: bool | None = None
-
-
-class AttributeValueCreateRequest(BaseModel):
-    attribute_id: int = Field(gt=0)
-    value: str = Field(min_length=1, max_length=100)
-
-
-class AttributeValueUpdateRequest(BaseModel):
-    attribute_id: int | None = Field(default=None, gt=0)
-    value: str | None = Field(default=None, min_length=1, max_length=100)
-
-
 class MetalRateCreateRequest(BaseModel):
     base_metal_id: int = Field(gt=0)
     rate_per_gram: float = Field(gt=0)
@@ -266,20 +242,6 @@ class MetalRateBulkUpdateRequest(BaseModel):
     gold_rate_per_gram: float | None = Field(default=None, ge=0)
     silver_rate_per_gram: float | None = Field(default=None, ge=0)
     effective_from: datetime | None = None
-
-
-class VariantTypeCreateRequest(BaseModel):
-    name: str = Field(min_length=1, max_length=120)
-    description: str | None = None
-    display_order: int | None = None
-    attribute_ids: list[int] = Field(default_factory=list)
-
-
-class VariantTypeUpdateRequest(BaseModel):
-    name: str | None = Field(default=None, min_length=1, max_length=120)
-    description: str | None = None
-    display_order: int | None = None
-    attribute_ids: list[int] | None = None
 
 
 class MetalTypeCreateRequest(BaseModel):
@@ -357,21 +319,8 @@ class AdminSubcategoryLookupResponse(BaseModel):
     category_id: int | None
     name: str
     slug: str
-    default_variant_type_id: int | None = None
     size_label: str | None = None
     size_unit: str | None = None
-
-    class Config:
-        orm_mode = True
-
-
-class AdminVariantTypeLookupResponse(BaseModel):
-    id: int
-    name: str
-    slug: str
-    description: str | None = None
-    display_order: int | None = None
-    attribute_ids: list[int] = Field(default_factory=list)
 
     class Config:
         orm_mode = True
@@ -406,24 +355,6 @@ class AdminStoneLookupResponse(BaseModel):
 
     class Config:
         orm_mode = True
-
-
-class AdminAttributeValueLookupResponse(BaseModel):
-    id: int
-    attribute_id: int | None = None
-    attribute_name: str | None = None
-    value: str | None
-
-    class Config:
-        orm_mode = True
-
-
-class AdminAttributeLookupResponse(BaseModel):
-    id: int
-    name: str | None
-    slug: str | None
-    filterable: bool | None = None
-    values: list[AdminAttributeValueLookupResponse]
 
 
 class AdminMetalPurityLookupResponse(BaseModel):
@@ -516,7 +447,6 @@ class AdminProductListResponse(BaseModel):
 class AdminVariantResponse(BaseModel):
     id: UUID
     product_id: UUID
-    attribute_values: list[AdminAttributeValueLookupResponse] = Field(default_factory=list)
     # D21/H-01: the one variation dimension (ring size, length, ...). Display
     # label (attribute_label) and its unit/label come from the subcategory.
     size_value: str | None = None
@@ -581,7 +511,6 @@ class AdminProductDetailResponse(AdminProductResponse):
     images: list[AdminImageResponse]
     collection_ids: list[int]
     tag_ids: list[int]
-    attribute_value_ids: list[int]
     stones: list[AdminStoneRelationItem]
 
 

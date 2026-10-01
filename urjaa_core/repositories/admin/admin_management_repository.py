@@ -5,8 +5,6 @@ from sqlalchemy import case, func, or_
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session, selectinload
 
-from urjaa_core.models.attribute import Attribute
-from urjaa_core.models.attribute_value import AttributeValue
 from urjaa_core.models.base_metal import BaseMetal
 from urjaa_core.models.category import Category
 from urjaa_core.models.collection import Collection
@@ -15,7 +13,6 @@ from urjaa_core.models.metal_color import MetalColor
 from urjaa_core.models.metal_purity import MetalPurity
 from urjaa_core.models.metal_rate import MetalRate
 from urjaa_core.models.product import Product
-from urjaa_core.models.product_attribute import ProductAttribute
 from urjaa_core.models.product_collection import ProductCollection
 from urjaa_core.models.product_image import ProductImage
 from urjaa_core.models.product_stone import ProductStone
@@ -24,9 +21,6 @@ from urjaa_core.models.product_variant import ProductVariant
 from urjaa_core.models.stone import Stone
 from urjaa_core.models.subcategory import Subcategory
 from urjaa_core.models.tag import Tag
-from urjaa_core.models.variant_type import VariantType
-from urjaa_core.models.variant_type_attribute import VariantTypeAttribute
-from urjaa_core.models.variant_attribute import VariantAttribute
 from urjaa_core.models.sale import Sale
 
 
@@ -367,55 +361,6 @@ class AdminManagementRepository:
         db.delete(subcategory)
 
     @staticmethod
-    def get_variant_types(db: Session) -> list[VariantType]:
-        return (
-            db.query(VariantType)
-            .options(selectinload(VariantType.attributes))
-            .order_by(VariantType.display_order.asc().nullslast(), VariantType.name.asc())
-            .all()
-        )
-
-    @staticmethod
-    def get_variant_type_by_id(db: Session, variant_type_id: int) -> VariantType | None:
-        return (
-            db.query(VariantType)
-            .options(
-                selectinload(VariantType.attributes)
-                .selectinload(VariantTypeAttribute.attribute)
-                .selectinload(Attribute.values)
-            )
-            .filter(VariantType.id == variant_type_id)
-            .first()
-        )
-
-    @staticmethod
-    def get_variant_type_by_slug(db: Session, slug: str) -> VariantType | None:
-        return db.query(VariantType).filter(VariantType.slug == slug).first()
-
-    @staticmethod
-    def create_variant_type(db: Session, variant_type: VariantType) -> VariantType:
-        db.add(variant_type)
-        db.flush()
-        db.refresh(variant_type)
-        return variant_type
-
-    @staticmethod
-    def update_variant_type(db: Session, variant_type: VariantType) -> VariantType:
-        db.flush()
-        db.refresh(variant_type)
-        return variant_type
-
-    @staticmethod
-    def delete_variant_type(db: Session, variant_type: VariantType) -> None:
-        db.delete(variant_type)
-
-    @staticmethod
-    def replace_variant_type_attributes(db: Session, variant_type_id: int, attribute_ids: list[int]) -> None:
-        db.query(VariantTypeAttribute).filter(VariantTypeAttribute.variant_type_id == variant_type_id).delete()
-        for attribute_id in attribute_ids:
-            db.add(VariantTypeAttribute(variant_type_id=variant_type_id, attribute_id=attribute_id))
-
-    @staticmethod
     def get_collections(db: Session) -> list[Collection]:
         return db.query(Collection).order_by(Collection.display_order.asc().nullslast(), Collection.name.asc()).all()
 
@@ -426,15 +371,6 @@ class AdminManagementRepository:
     @staticmethod
     def get_stones(db: Session) -> list[Stone]:
         return db.query(Stone).order_by(Stone.name.asc()).all()
-
-    @staticmethod
-    def get_attributes(db: Session) -> list[Attribute]:
-        return (
-            db.query(Attribute)
-            .options(selectinload(Attribute.values))
-            .order_by(Attribute.name.asc())
-            .all()
-        )
 
     @staticmethod
     def get_metal_purities(db: Session) -> list[MetalPurity]:
@@ -734,71 +670,6 @@ class AdminManagementRepository:
         db.delete(stone)
 
     @staticmethod
-    def get_attribute_by_id(db: Session, attribute_id: int) -> Attribute | None:
-        return (
-            db.query(Attribute)
-            .options(selectinload(Attribute.values))
-            .filter(Attribute.id == attribute_id)
-            .first()
-        )
-
-    @staticmethod
-    def get_attribute_by_slug(db: Session, slug: str) -> Attribute | None:
-        return db.query(Attribute).filter(Attribute.slug == slug).first()
-
-    @staticmethod
-    def create_attribute(db: Session, attribute: Attribute) -> Attribute:
-        db.add(attribute)
-        db.flush()
-        db.refresh(attribute)
-        return attribute
-
-    @staticmethod
-    def delete_attribute(db: Session, attribute: Attribute) -> None:
-        db.delete(attribute)
-
-    @staticmethod
-    def get_attribute_values(db: Session) -> list[AttributeValue]:
-        return (
-            db.query(AttributeValue)
-            .options(selectinload(AttributeValue.attribute))
-            .order_by(AttributeValue.id.asc())
-            .all()
-        )
-
-    @staticmethod
-    def get_attribute_value_by_id(db: Session, value_id: int) -> AttributeValue | None:
-        return (
-            db.query(AttributeValue)
-            .options(selectinload(AttributeValue.attribute))
-            .filter(AttributeValue.id == value_id)
-            .first()
-        )
-
-    @staticmethod
-    def get_attribute_value_by_attribute_and_value(
-        db: Session,
-        attribute_id: int,
-        value: str,
-    ) -> AttributeValue | None:
-        return (
-            db.query(AttributeValue)
-            .filter(AttributeValue.attribute_id == attribute_id, func.lower(AttributeValue.value) == value.lower())
-            .first()
-        )
-
-    @staticmethod
-    def create_attribute_value(db: Session, value: AttributeValue) -> AttributeValue:
-        db.add(value)
-        db.flush()
-        db.refresh(value)
-        return value
-
-    @staticmethod
-    def delete_attribute_value(db: Session, value: AttributeValue) -> None:
-        db.delete(value)
-
-    @staticmethod
     def get_metal_rate_by_id(db: Session, rate_id: int) -> MetalRate | None:
         return (
             db.query(MetalRate)
@@ -879,11 +750,9 @@ class AdminManagementRepository:
             db.query(Product)
             .options(
                 selectinload(Product.subcategory),
-                selectinload(Product.variants).selectinload(ProductVariant.attribute_values),
                 selectinload(Product.images),
                 selectinload(Product.collections),
                 selectinload(Product.tags),
-                selectinload(Product.attributes).selectinload(ProductAttribute.attribute_value),
                 selectinload(Product.stones),
                 selectinload(Product.gender),
             )
@@ -912,7 +781,6 @@ class AdminManagementRepository:
         db.query(ProductImage).filter(ProductImage.product_id == product_id).delete()
         db.query(ProductVariant).filter(ProductVariant.product_id == product_id, ProductVariant.store_id == store_id).delete()
         db.query(ProductStone).filter(ProductStone.product_id == product_id).delete()
-        db.query(ProductAttribute).filter(ProductAttribute.product_id == product_id).delete()
         db.query(ProductCollection).filter(ProductCollection.product_id == product_id).delete()
         db.query(ProductTag).filter(ProductTag.product_id == product_id).delete()
 
@@ -969,7 +837,6 @@ class AdminManagementRepository:
 
     @staticmethod
     def delete_variant(db: Session, variant: ProductVariant) -> None:
-        db.query(VariantAttribute).filter(VariantAttribute.variant_id == variant.id).delete()
         db.delete(variant)
 
     @staticmethod
@@ -1026,34 +893,10 @@ class AdminManagementRepository:
         return db.query(Tag).filter(Tag.id.in_(ids)).all()
 
     @staticmethod
-    def get_attribute_values_by_ids(db: Session, ids: list[int]) -> list[AttributeValue]:
-        if not ids:
-            return []
-        return db.query(AttributeValue).filter(AttributeValue.id.in_(ids)).all()
-
-    @staticmethod
-    def get_attributes_by_ids(db: Session, ids: list[int]) -> list[Attribute]:
-        if not ids:
-            return []
-        return db.query(Attribute).filter(Attribute.id.in_(ids)).all()
-
-    @staticmethod
     def get_stones_by_ids(db: Session, ids: list[int]) -> list[Stone]:
         if not ids:
             return []
         return db.query(Stone).filter(Stone.id.in_(ids)).all()
-
-    @staticmethod
-    def replace_product_attributes(db: Session, product_id: UUID, attribute_value_ids: list[int]) -> None:
-        db.query(ProductAttribute).filter(ProductAttribute.product_id == product_id).delete()
-        for value_id in attribute_value_ids:
-            db.add(ProductAttribute(product_id=product_id, attribute_value_id=value_id))
-
-    @staticmethod
-    def replace_variant_attributes(db: Session, variant_id: UUID, attribute_value_ids: list[int]) -> None:
-        db.query(VariantAttribute).filter(VariantAttribute.variant_id == variant_id).delete()
-        for value_id in attribute_value_ids:
-            db.add(VariantAttribute(variant_id=variant_id, attribute_value_id=value_id))
 
     @staticmethod
     def replace_product_stones(

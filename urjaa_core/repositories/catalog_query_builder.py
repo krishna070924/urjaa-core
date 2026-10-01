@@ -4,8 +4,6 @@ from uuid import UUID
 from sqlalchemy import func
 from sqlalchemy.orm import Query
 
-from urjaa_core.models.attribute import Attribute
-from urjaa_core.models.attribute_value import AttributeValue
 from urjaa_core.models.base_metal import BaseMetal
 from urjaa_core.models.category import Category
 from urjaa_core.models.collection import Collection
@@ -16,7 +14,6 @@ from urjaa_core.models.metal_rate import MetalRate
 from urjaa_core.models.order import Order
 from urjaa_core.models.order_item import OrderItem
 from urjaa_core.models.product import Product
-from urjaa_core.models.product_attribute import ProductAttribute
 from urjaa_core.models.product_collection import ProductCollection
 from urjaa_core.models.product_stone import ProductStone
 from urjaa_core.models.product_tag import ProductTag
@@ -439,19 +436,8 @@ class CatalogQueryBuilder:
                 self.query = self.query.filter(Product.gender_id.in_(gender_ids))
                 continue
 
-            subquery = (
-                self.query.session.query(ProductAttribute.product_id)
-                .join(AttributeValue, AttributeValue.id == ProductAttribute.attribute_value_id)
-                .join(Attribute, Attribute.id == AttributeValue.attribute_id)
-                .filter(
-                    func.lower(Attribute.slug) == func.lower(attr_slug),
-                    Attribute.filterable.is_(True),
-                    func.lower(AttributeValue.value).in_(normalized_values),
-                )
-                .subquery()
-            )
-
-            self.query = self.query.filter(Product.id.in_(subquery))
+            # H-06: product-level EAV (generic attribute facets) retired —
+            # every other key is a no-op now.
 
         return self
 
