@@ -20,32 +20,32 @@ _stone_name = ProductStone.name.fget
 
 
 def test_base_metal_name_present():
-    variant = SimpleNamespace(base_metal=SimpleNamespace(name="Gold"))
+    variant = SimpleNamespace(metal=None, base_metal=SimpleNamespace(name="Gold"))
     assert _base_metal_name(variant) == "Gold"
 
 
 def test_base_metal_name_none_when_unset():
-    variant = SimpleNamespace(base_metal=None)
+    variant = SimpleNamespace(metal=None, base_metal=None)
     assert _base_metal_name(variant) is None
 
 
 def test_metal_color_name_present():
-    variant = SimpleNamespace(metal_color=SimpleNamespace(name="Yellow"))
+    variant = SimpleNamespace(metal=None, metal_color=SimpleNamespace(name="Yellow"))
     assert _metal_color_name(variant) == "Yellow"
 
 
 def test_metal_color_name_none_when_unset():
-    variant = SimpleNamespace(metal_color=None)
+    variant = SimpleNamespace(metal=None, metal_color=None)
     assert _metal_color_name(variant) is None
 
 
 def test_metal_purity_label_present():
-    variant = SimpleNamespace(metal_purity=SimpleNamespace(purity_label="BIS 750 (18K)"))
+    variant = SimpleNamespace(metal=None, metal_purity=SimpleNamespace(purity_label="BIS 750 (18K)"))
     assert _metal_purity_label(variant) == "BIS 750 (18K)"
 
 
 def test_metal_purity_label_none_when_unset():
-    variant = SimpleNamespace(metal_purity=None)
+    variant = SimpleNamespace(metal=None, metal_purity=None)
     assert _metal_purity_label(variant) is None
 
 

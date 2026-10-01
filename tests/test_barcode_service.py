@@ -8,13 +8,14 @@ correct Code128, not just that bytes came out the other end.
 
 from io import BytesIO
 
+import pytest
 from PIL import Image
 
 from urjaa_core.services.admin.barcode_service import BarcodeService
 
 
 def _decode(png_bytes: bytes):
-    import zxingcpp
+    zxingcpp = pytest.importorskip("zxingcpp")
 
     results = zxingcpp.read_barcodes(Image.open(BytesIO(png_bytes)))
     assert len(results) == 1, f"expected exactly one barcode, got {results}"
