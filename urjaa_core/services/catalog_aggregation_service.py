@@ -36,7 +36,6 @@ class CatalogAggregationService:
             "metal_purities": lambda: CatalogAggregationRepository.get_metal_purity_counts(db, base_query),
             "sizes": lambda: CatalogAggregationRepository.get_size_counts(db, base_query),
             "genders": lambda: CatalogAggregationRepository.get_gender_counts(db, base_query),
-            "attributes_data": lambda: CatalogAggregationRepository.get_attribute_counts(db, base_query),
             "price_ranges": lambda: CatalogAggregationRepository.get_price_buckets(db, store_id, base_query),
         }
 
@@ -45,15 +44,6 @@ class CatalogAggregationService:
         # Using sequential execution to stay thread-safe with the Session object
         for key, fn in tasks.items():
             results[key] = fn()
-
-        # H-11: gender now comes from get_gender_counts (products.gender_id),
-        # not the generic EAV attribute scan. Any stray "gender" EAV attribute
-        # left over from before H-08/H-11 is dropped here so it can't surface
-        # as a second, stale gender facet alongside the real one.
-        attributes_data = results["attributes_data"]
-        dynamic_attributes = [
-            attribute for attribute in attributes_data if str(attribute.get("attribute", "")).lower() != "gender"
-        ]
 
         return {
             "categories": results["categories"],
@@ -65,7 +55,6 @@ class CatalogAggregationService:
             "metal_purities": results["metal_purities"],
             "sizes": results["sizes"],
             "genders": results["genders"],
-            "attributes": dynamic_attributes,
             "price_ranges": results["price_ranges"],
         }
     
