@@ -818,7 +818,12 @@ class AdminManagementRepository:
         offset = (page - 1) * limit
         query = (
             db.query(Product)
-            .options(selectinload(Product.subcategory), selectinload(Product.variants), selectinload(Product.store))
+            .options(
+                selectinload(Product.subcategory),
+                selectinload(Product.variants),
+                selectinload(Product.store),
+                selectinload(Product.gender),
+            )
             .outerjoin(Subcategory, Subcategory.id == Product.subcategory_id)
             .outerjoin(Category, Category.id == Subcategory.category_id)
             # H-08: default admin list hides soft-deleted products.
@@ -851,6 +856,7 @@ class AdminManagementRepository:
                 selectinload(Product.subcategory),
                 selectinload(Product.variants),
                 selectinload(Product.images),
+                selectinload(Product.gender),
             )
             # H-08: default admin list (cross-store) hides soft-deleted products.
             .filter(Product.deleted_at.is_(None))
@@ -862,7 +868,7 @@ class AdminManagementRepository:
     def get_product_by_id(db: Session, product_id: UUID, store_id: UUID) -> Product | None:
         return (
             db.query(Product)
-            .options(selectinload(Product.subcategory))
+            .options(selectinload(Product.subcategory), selectinload(Product.gender))
             .filter(Product.id == product_id, Product.store_id == store_id)
             .first()
         )
@@ -879,6 +885,7 @@ class AdminManagementRepository:
                 selectinload(Product.tags),
                 selectinload(Product.attributes).selectinload(ProductAttribute.attribute_value),
                 selectinload(Product.stones),
+                selectinload(Product.gender),
             )
             .filter(Product.id == product_id, Product.store_id == store_id)
             .first()

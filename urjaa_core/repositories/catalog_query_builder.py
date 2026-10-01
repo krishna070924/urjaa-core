@@ -9,6 +9,7 @@ from urjaa_core.models.attribute_value import AttributeValue
 from urjaa_core.models.base_metal import BaseMetal
 from urjaa_core.models.category import Category
 from urjaa_core.models.collection import Collection
+from urjaa_core.models.gender import Gender
 from urjaa_core.models.metal_color import MetalColor
 from urjaa_core.models.metal_purity import MetalPurity
 from urjaa_core.models.metal_rate import MetalRate
@@ -424,6 +425,18 @@ class CatalogQueryBuilder:
 
             normalized_values = self._normalize_values(value)
             if not normalized_values:
+                continue
+
+            if attr_slug.lower() == "gender":
+                # H-11/D21/H-08: gender moved off EAV onto products.gender_id.
+                # Existing EAV gender rows (pre-H-11) are left in place but no
+                # longer read -- this is the storefront's one gender filter.
+                gender_ids = (
+                    self.query.session.query(Gender.id)
+                    .filter(func.lower(Gender.name).in_(normalized_values))
+                    .subquery()
+                )
+                self.query = self.query.filter(Product.gender_id.in_(gender_ids))
                 continue
 
             subquery = (
