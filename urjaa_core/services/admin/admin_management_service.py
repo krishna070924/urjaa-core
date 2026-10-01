@@ -21,6 +21,7 @@ from urjaa_core.models.attribute_value import AttributeValue
 from urjaa_core.models.base_metal import BaseMetal
 from urjaa_core.models.category import Category
 from urjaa_core.models.collection import Collection
+from urjaa_core.models.gender import Gender
 from urjaa_core.models.metal import Metal
 from urjaa_core.models.metal_color import MetalColor
 from urjaa_core.models.metal_purity import MetalPurity
@@ -122,11 +123,14 @@ class AdminManagementService:
                 return sku
 
     @staticmethod
-    def _normalize_gender_key(value: str | None) -> str:
-        normalized = (value or "").strip().lower()
-        if normalized in AdminManagementService.GENDER_VALUE_MAP:
-            return normalized
-        return AdminManagementService.DEFAULT_GENDER_KEY
+    def _resolve_gender_id(db: Session, gender: str) -> int:
+        """H-11: the request's men/women/unisex, matched case-insensitively
+        against the `genders` lookup (D21/H-08) -- create/update/duplicate/CSV
+        import all write gender_id through this now, not EAV."""
+        row = db.query(Gender).filter(func.lower(Gender.name) == gender.strip().lower()).first()
+        if row is None:
+            raise AdminManagementService._field_error("gender", f"Unknown gender: {gender!r}")
+        return row.id
 
     @staticmethod
     def _ensure_gender_attribute_values(db: Session) -> tuple[Attribute, dict[str, AttributeValue]]:
@@ -160,31 +164,6 @@ class AdminManagementService:
             existing_values[key] = created
 
         return attribute, existing_values
-
-    @staticmethod
-    def _set_product_gender_attribute(db: Session, product_id: UUID, gender: str | None) -> None:
-        attribute, values = AdminManagementService._ensure_gender_attribute_values(db)
-        gender_key = AdminManagementService._normalize_gender_key(gender)
-        fallback_key = AdminManagementService.DEFAULT_GENDER_KEY
-        target_value = values.get(gender_key) or values.get(fallback_key)
-        if target_value is None:
-            raise HTTPException(status_code=500, detail="Gender attribute values are not configured")
-
-        existing_gender_rows = (
-            db.query(ProductAttribute)
-            .join(AttributeValue, AttributeValue.id == ProductAttribute.attribute_value_id)
-            .filter(
-                ProductAttribute.product_id == product_id,
-                AttributeValue.attribute_id == attribute.id,
-            )
-            .all()
-        )
-
-        for row in existing_gender_rows:
-            db.delete(row)
-
-        db.flush()
-        db.add(ProductAttribute(product_id=product_id, attribute_value_id=target_value.id))
 
     @staticmethod
     def get_products_global(db: Session, page: int = 1, limit: int = 200, search: str | None = None) -> tuple[list[dict], int]:
@@ -642,6 +621,9 @@ class AdminManagementService:
             }
 
         products_by_slug: dict[str, Product] = {}
+        # CSV doesn't carry a gender column -- every imported product gets the
+        # same default (H-11: written to gender_id now, not EAV).
+        default_gender_id = AdminManagementService._resolve_gender_id(db, AdminManagementService.DEFAULT_GENDER_KEY)
 
         try:
             for slug, meta in product_meta_by_slug.items():
@@ -654,9 +636,9 @@ class AdminManagementService:
                     status=meta["status"],
                     featured=meta["featured"],
                     customizable=meta["customizable"],
+                    gender_id=default_gender_id,
                 )
                 created_product = AdminManagementRepository.create_product(db, product)
-                AdminManagementService._set_product_gender_attribute(db, created_product.id, None)
                 products_by_slug[slug] = created_product
 
             created_variant_count = 0
@@ -816,11 +798,16 @@ class AdminManagementService:
             if not variant_type:
                 raise HTTPException(status_code=404, detail="Variant type not found")
 
+        if payload.size_unit and not payload.size_label:
+            raise AdminManagementService._field_error("size_unit", "size_unit requires size_label")
+
         subcategory = Subcategory(
             category_id=payload.category_id,
             name=name,
             slug=slug,
             default_variant_type_id=payload.default_variant_type_id,
+            size_label=payload.size_label,
+            size_unit=payload.size_unit,
         )
         try:
             created = AdminManagementRepository.create_subcategory(db, subcategory)
@@ -859,6 +846,14 @@ class AdminManagementService:
             if not variant_type:
                 raise HTTPException(status_code=404, detail="Variant type not found")
             subcategory.default_variant_type_id = payload.default_variant_type_id
+
+        if payload.size_label is not None:
+            subcategory.size_label = payload.size_label
+        if payload.size_unit is not None:
+            subcategory.size_unit = payload.size_unit
+
+        if subcategory.size_unit and not subcategory.size_label:
+            raise AdminManagementService._field_error("size_unit", "size_unit requires size_label")
 
         try:
             db.commit()
@@ -1853,6 +1848,7 @@ class AdminManagementService:
             featured=payload.featured,
             customizable=payload.customizable,
             status=payload.status,
+            gender_id=AdminManagementService._resolve_gender_id(db, payload.gender),
         )
 
         normalized_collection_ids = list(dict.fromkeys(payload.collection_ids or []))
@@ -1934,7 +1930,6 @@ class AdminManagementService:
 
         try:
             created = AdminManagementRepository.create_product(db, product)
-            AdminManagementService._set_product_gender_attribute(db, created.id, payload.gender)
 
             if collection_rows:
                 created.collections = collection_rows
@@ -2008,6 +2003,7 @@ class AdminManagementService:
             status="draft",
             featured=source.featured,
             customizable=source.customizable,
+            gender_id=source.gender_id,
         )
 
         try:
@@ -2128,7 +2124,7 @@ class AdminManagementService:
             product.subcategory_id = payload.subcategory_id
 
         if payload.gender is not None:
-            AdminManagementService._set_product_gender_attribute(db, product.id, payload.gender)
+            product.gender_id = AdminManagementService._resolve_gender_id(db, payload.gender)
 
         try:
             db.commit()

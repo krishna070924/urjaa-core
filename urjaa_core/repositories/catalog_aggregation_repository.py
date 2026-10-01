@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func
 
 from urjaa_core.models.product import Product
+from urjaa_core.models.gender import Gender
 from urjaa_core.models.subcategory import Subcategory
 from urjaa_core.models.category import Category
 from urjaa_core.models.product_stone import ProductStone
@@ -241,6 +242,28 @@ class CatalogAggregationRepository:
                 "count": count,
             }
             for size_value, size_label, size_unit, count in query.all()
+        ]
+
+    @staticmethod
+    def get_gender_counts(db: Session, base_query):
+        # H-11/D21/H-08: gender now lives on products.gender_id, not EAV --
+        # same shape as the old EAV-derived "gender" facet bucket so
+        # CatalogAggregationService can return it unchanged.
+        query = (
+            db.query(
+                Gender.name,
+                func.count(func.distinct(base_query.c.id)),
+            )
+            .select_from(base_query)
+            .join(Product, Product.id == base_query.c.id)
+            .join(Gender, Gender.id == Product.gender_id)
+            .group_by(Gender.name)
+            .order_by(Gender.name.asc())
+        )
+
+        return [
+            {"value": name, "slug": _slugify(name), "count": count}
+            for name, count in query.all()
         ]
 
     @staticmethod

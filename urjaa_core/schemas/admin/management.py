@@ -170,12 +170,29 @@ class SubcategoryCreateRequest(BaseModel):
     category_id: int = Field(gt=0)
     name: str = Field(min_length=1, max_length=120)
     default_variant_type_id: int | None = Field(default=None, gt=0)
+    # D21/H-01: what this subcategory's single variation dimension is called,
+    # and in what unit (e.g. "Ring Size" / "US"). Blank means products here
+    # don't vary by size -- the service rejects a unit given without a label.
+    size_label: str | None = Field(default=None, max_length=50)
+    size_unit: str | None = Field(default=None, max_length=20)
+
+    @field_validator("size_label", "size_unit")
+    @classmethod
+    def _strip_size_fields(cls, v: str | None) -> str | None:
+        return (v.strip() or None) if v is not None else None
 
 
 class SubcategoryUpdateRequest(BaseModel):
     category_id: int | None = Field(default=None, gt=0)
     name: str | None = Field(default=None, min_length=1, max_length=120)
     default_variant_type_id: int | None = Field(default=None, gt=0)
+    size_label: str | None = Field(default=None, max_length=50)
+    size_unit: str | None = Field(default=None, max_length=20)
+
+    @field_validator("size_label", "size_unit")
+    @classmethod
+    def _strip_size_fields(cls, v: str | None) -> str | None:
+        return (v.strip() or None) if v is not None else None
 
 
 class CollectionCreateRequest(BaseModel):
@@ -341,6 +358,8 @@ class AdminSubcategoryLookupResponse(BaseModel):
     name: str
     slug: str
     default_variant_type_id: int | None = None
+    size_label: str | None = None
+    size_unit: str | None = None
 
     class Config:
         orm_mode = True
@@ -471,6 +490,8 @@ class AdminProductResponse(BaseModel):
     featured: bool
     customizable: bool
     status: ProductStatus
+    # H-11: derived from products.gender_id (D21/H-08), not EAV.
+    gender: ProductGender | None = None
     starting_price: float | None = None
     created_at: datetime | None = None
     variant_count: int | None = None
