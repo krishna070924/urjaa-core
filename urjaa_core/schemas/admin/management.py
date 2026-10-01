@@ -538,7 +538,10 @@ class SetPrimaryImageResponse(BaseModel):
 
 
 class AdminBulkUploadRowErrorResponse(BaseModel):
-    row_number: int
+    # int for the CSV path (position in the file); str for the xlsx path,
+    # where it names the sheet + row staff actually see, e.g. "variants row 5"
+    # (K-01 -- a CSV file has no sheets to distinguish).
+    row_number: int | str
     errors: list[str]
 
 

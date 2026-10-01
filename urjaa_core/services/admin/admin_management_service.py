@@ -28,6 +28,7 @@ from urjaa_core.models.subcategory import Subcategory
 from urjaa_core.models.tag import Tag
 from urjaa_core.models.sale import Sale
 from urjaa_core.models.store import Store
+from urjaa_core.utils.excel_template import parse_bulk_upload_workbook
 from urjaa_core.repositories.admin.admin_management_repository import AdminManagementRepository
 from urjaa_core.schemas.admin.management import (
     CategoryCreateRequest,
@@ -111,7 +112,10 @@ class AdminManagementService:
         import all write gender_id through this now, not EAV."""
         row = db.query(Gender).filter(func.lower(Gender.name) == gender.strip().lower()).first()
         if row is None:
-            raise AdminManagementService._field_error("gender", f"Unknown gender: {gender!r}")
+            valid = ", ".join(g.name for g in AdminManagementRepository.get_genders(db))
+            raise AdminManagementService._field_error(
+                "gender", f"Unknown gender: {gender!r}. Valid: {valid}"
+            )
         return row.id
 
     @staticmethod
@@ -195,12 +199,6 @@ class AdminManagementService:
         offset = (page - 1) * limit
         paged = deduped_items[offset: offset + limit]
         return paged, total
-
-    @staticmethod
-    def _parse_optional_int(value: str | None) -> int | None:
-        if value is None or value == "":
-            return None
-        return int(value)
 
     @staticmethod
     def _parse_optional_float(value: str | None) -> float | None:
@@ -321,6 +319,12 @@ class AdminManagementService:
             db.rollback()
             raise
 
+    # K-01: the pre-slice-H template's legacy metal columns. A file still
+    # using them is rejected up front with a clear message rather than
+    # silently ignored -- simpler than threading a non-blocking "warnings"
+    # channel through every row (the response schema only has `errors`).
+    _STALE_TEMPLATE_COLUMNS = {"base_metal_id", "metal_color_id", "metal_purity_id", "stone_cost"}
+
     @staticmethod
     def bulk_upload_products_from_csv_rows(db: Session, store_id: UUID, rows: list[dict[str, str]]) -> dict:
         if not rows:
@@ -332,6 +336,25 @@ class AdminManagementService:
                     {
                         "row_number": 1,
                         "errors": ["CSV is empty"],
+                    }
+                ],
+            }
+
+        header_keys = {str(key).strip() for key in rows[0].keys()}
+        stale_columns = AdminManagementService._STALE_TEMPLATE_COLUMNS & header_keys
+        if stale_columns:
+            return {
+                "success": False,
+                "inserted_products": 0,
+                "inserted_variants": 0,
+                "errors": [
+                    {
+                        "row_number": 1,
+                        "errors": [
+                            f"This file uses old template columns ({', '.join(sorted(stale_columns))}) that no "
+                            "longer apply. Download the new template: metal is now a single 'metal' column "
+                            "matched by name, and stones are entered per product, not per variant."
+                        ],
                     }
                 ],
             }
@@ -348,6 +371,17 @@ class AdminManagementService:
         existing_variant_sku_cache: dict[str, bool] = {}
         category_cache: dict[str, Category | None] = {}
         subcategory_cache: dict[str, Subcategory | None] = {}
+
+        # H-10/K-01: metal is resolved by name against the `metals` combination
+        # table (display_name), case-insensitive/trimmed -- same row the admin
+        # API matches metal_id against. Loaded once for the whole upload.
+        all_metals = AdminManagementRepository.get_metals(db)
+        metal_by_name = {m.display_name.strip().lower(): m for m in all_metals if m.display_name}
+        valid_metal_names = ", ".join(sorted(m.display_name for m in all_metals if m.display_name))
+
+        # K-01: products sheet gender is optional -- blank rows get the same
+        # default create_product's own default does (H-11).
+        default_gender_id = AdminManagementService._resolve_gender_id(db, AdminManagementService.DEFAULT_GENDER_KEY)
 
         # Slug is always auto-generated from product_name — never accepted from user input.
         # Category is resolved by name (case-insensitive). Subcategory is optional.
@@ -398,6 +432,18 @@ class AdminManagementService:
                 errs.append(f"Subcategory not found: \"{subcategory_name}\" under the specified category")
             return sub, errs
 
+        def _resolve_gender(normalized: dict) -> tuple[int | None, list[str]]:
+            """Return (gender_id, errors). Blank -> the same default create_product uses."""
+            gender_name = normalized.get("gender", "").strip()
+            if not gender_name:
+                return default_gender_id, []
+            try:
+                return AdminManagementService._resolve_gender_id(db, gender_name), []
+            except HTTPException as exc:
+                detail = exc.detail
+                msg = detail[0]["msg"] if isinstance(detail, list) and detail else str(detail)
+                return None, [msg]
+
         for row_index, row in enumerate(rows, start=2):
             row_errors: list[str] = []
             normalized = {str(key).strip(): (value.strip() if isinstance(value, str) else "") for key, value in row.items()}
@@ -418,6 +464,9 @@ class AdminManagementService:
                     normalized, category_id=category.id
                 )
                 row_errors.extend(sub_errors)
+
+            gender_id, gender_errors = _resolve_gender(normalized)
+            row_errors.extend(gender_errors)
 
             # Slug is always auto-generated from product_name.
             # Rows sharing the same product_name map to the same product.
@@ -447,17 +496,14 @@ class AdminManagementService:
                     row_errors.append(f"Variant SKU already exists: {variant_sku}")
 
             parsed_stock_quantity = 0
-            parsed_stone_quantity = 0
             parsed_status = "draft"
             parsed_featured = False
             parsed_customizable = False
-            parsed_base_metal_id = None
-            parsed_metal_color_id = None
-            parsed_metal_purity_id = None
             parsed_metal_weight_grams = None
             parsed_price_override = None
-            parsed_stone_cost = 0.0
             parsed_making_charges = 0.0
+            parsed_size_value = normalized.get("size_value", "").strip() or None
+            parsed_spec_note = normalized.get("spec_note", "").strip() or None
 
             try:
                 parsed_stock_quantity = int(normalized.get("stock_quantity") or "0")
@@ -465,20 +511,6 @@ class AdminManagementService:
                     row_errors.append("stock_quantity must be >= 0")
             except ValueError:
                 row_errors.append("stock_quantity must be an integer")
-
-            try:
-                parsed_stone_quantity = int(normalized.get("stone_quantity") or "0")
-                if parsed_stone_quantity < 0:
-                    row_errors.append("stone_quantity must be >= 0")
-            except ValueError:
-                row_errors.append("stone_quantity must be an integer")
-
-            try:
-                parsed_stone_cost = float(normalized.get("stone_cost") or "0")
-                if parsed_stone_cost < 0:
-                    row_errors.append("stone_cost must be >= 0")
-            except ValueError:
-                row_errors.append("stone_cost must be a number")
 
             try:
                 parsed_making_charges = float(normalized.get("making_charges") or "0")
@@ -500,13 +532,33 @@ class AdminManagementService:
                 row_errors.append("featured/customizable must be boolean values")
 
             try:
-                parsed_base_metal_id = AdminManagementService._parse_optional_int(normalized.get("base_metal_id"))
-                parsed_metal_color_id = AdminManagementService._parse_optional_int(normalized.get("metal_color_id"))
-                parsed_metal_purity_id = AdminManagementService._parse_optional_int(normalized.get("metal_purity_id"))
                 parsed_metal_weight_grams = AdminManagementService._parse_optional_float(normalized.get("metal_weight_grams"))
                 parsed_price_override = AdminManagementService._parse_optional_float(normalized.get("price_override"))
             except ValueError:
-                row_errors.append("base_metal_id/metal_color_id/metal_purity_id must be integers; metal_weight_grams/price_override must be numeric")
+                row_errors.append("metal_weight_grams/price_override must be numeric")
+
+            if parsed_spec_note and len(parsed_spec_note) > 200:
+                row_errors.append("spec_note must be at most 200 characters")
+            if parsed_size_value and len(parsed_size_value) > 50:
+                row_errors.append("size_value must be at most 50 characters")
+
+            # K-01: metal is matched by display_name, not legacy ids (H-10 sets
+            # the same four fields from the resolved Metal row).
+            metal_name = normalized.get("metal", "").strip()
+            metal = None
+            if metal_name:
+                metal = metal_by_name.get(metal_name.lower())
+                if metal is None:
+                    row_errors.append(f"Metal '{metal_name}' not found. Valid: {valid_metal_names}")
+
+            # K-01: size_value only makes sense for a subcategory that has a
+            # size_label configured (D21) -- same thing the admin UI hides the
+            # field for, enforced here since CSV has no UI to hide it behind.
+            if parsed_size_value and not (subcategory and subcategory.size_label):
+                if subcategory:
+                    row_errors.append(f"Subcategory '{subcategory.name}' doesn't use sizes (no size_label configured)")
+                else:
+                    row_errors.append("size_value given but no subcategory_name set — this product doesn't use sizes")
 
             if product_slug:
                 current_meta = {
@@ -516,6 +568,7 @@ class AdminManagementService:
                     "status": parsed_status,
                     "featured": parsed_featured,
                     "customizable": parsed_customizable,
+                    "gender_id": gender_id,
                 }
 
                 existing_meta = product_meta_by_slug.get(product_slug)
@@ -524,34 +577,29 @@ class AdminManagementService:
                 elif existing_meta != current_meta:
                     row_errors.append(
                         f"Rows with the same product_name \"{product_name}\" must have identical "
-                        "product-level fields (description, status, subcategory, featured, customizable)"
+                        "product-level fields (description, status, subcategory, gender, featured, customizable)"
                     )
 
             if row_errors:
                 errors.append({"row_number": row_index, "errors": row_errors})
                 continue
 
-            # H-10: CSV only carries the legacy triad, never metal_id itself --
-            # resolve it the same way a legacy-only API request does (D25).
-            parsed_metal_id = AdminManagementService._resolve_metal_id_from_legacy(
-                db, parsed_base_metal_id, parsed_metal_color_id, parsed_metal_purity_id
-            )
-
             normalized_rows.append(
                 {
                     "product_slug": product_slug,
                     "variant": {
-                        "metal_id": parsed_metal_id,
-                        "base_metal_id": parsed_base_metal_id,
-                        "metal_color_id": parsed_metal_color_id,
-                        "metal_purity_id": parsed_metal_purity_id,
+                        "metal_id": metal.id if metal else None,
+                        "base_metal_id": metal.base_metal_id if metal else None,
+                        "metal_color_id": metal.metal_color_id if metal else None,
+                        "metal_purity_id": metal.metal_purity_id if metal else None,
+                        "metal_type": metal.base_metal.name if metal and metal.base_metal else None,
                         "metal_weight_grams": parsed_metal_weight_grams,
                         "price_override": parsed_price_override,
-                        "stone_quantity": parsed_stone_quantity,
-                        "stone_cost": parsed_stone_cost,
                         "making_charges": parsed_making_charges,
                         "stock_quantity": parsed_stock_quantity,
                         "sku_code": variant_sku,
+                        "size_value": parsed_size_value,
+                        "spec_note": parsed_spec_note,
                     },
                 }
             )
@@ -565,9 +613,6 @@ class AdminManagementService:
             }
 
         products_by_slug: dict[str, Product] = {}
-        # CSV doesn't carry a gender column -- every imported product gets the
-        # same default (H-11: written to gender_id now, not EAV).
-        default_gender_id = AdminManagementService._resolve_gender_id(db, AdminManagementService.DEFAULT_GENDER_KEY)
 
         try:
             for slug, meta in product_meta_by_slug.items():
@@ -580,7 +625,7 @@ class AdminManagementService:
                     status=meta["status"],
                     featured=meta["featured"],
                     customizable=meta["customizable"],
-                    gender_id=default_gender_id,
+                    gender_id=meta["gender_id"],
                 )
                 created_product = AdminManagementRepository.create_product(db, product)
                 products_by_slug[slug] = created_product
@@ -596,13 +641,14 @@ class AdminManagementService:
                     base_metal_id=variant_payload["base_metal_id"],
                     metal_color_id=variant_payload["metal_color_id"],
                     metal_purity_id=variant_payload["metal_purity_id"],
+                    metal_type=variant_payload["metal_type"],
                     metal_weight_grams=variant_payload["metal_weight_grams"],
                     price_override=variant_payload["price_override"],
-                    stone_quantity=variant_payload["stone_quantity"],
-                    stone_cost=variant_payload["stone_cost"],
                     making_charges=variant_payload["making_charges"],
                     stock_quantity=variant_payload["stock_quantity"],
                     sku_code=variant_payload["sku_code"] or AdminManagementService._next_sku(db, product),
+                    size_value=variant_payload["size_value"],
+                    spec_note=variant_payload["spec_note"],
                 )
                 AdminManagementRepository.create_variant(db, variant)
                 created_variant_count += 1
@@ -617,6 +663,106 @@ class AdminManagementService:
         except Exception:
             db.rollback()
             raise
+
+    @staticmethod
+    def bulk_upload_products_from_xlsx(db: Session, store_id: UUID, content: bytes) -> dict:
+        """K-01: accept the downloaded .xlsx template directly, instead of
+        requiring staff to export a CSV first.
+
+        Reads the 'products' and 'variants' sheets (parse_bulk_upload_workbook
+        skips row EXAMPLE_ROW_NUMBER -- the template's filled-in example --
+        unconditionally), joins each variant row to its product by
+        product_name, and feeds the merged rows through
+        bulk_upload_products_from_csv_rows UNCHANGED -- metal/gender
+        resolution, SKU generation, every other rule stays defined in exactly
+        one place. Only the join itself (and the row-number translation back
+        to what staff see in Excel) is new here.
+        """
+        product_sheet_rows, variant_sheet_rows = parse_bulk_upload_workbook(content)
+
+        if not product_sheet_rows and not variant_sheet_rows:
+            return {
+                "success": False,
+                "inserted_products": 0,
+                "inserted_variants": 0,
+                "errors": [
+                    {
+                        "row_number": 1,
+                        "errors": [
+                            "No data rows found — fill in the products and variants sheets "
+                            "below the example row and try again"
+                        ],
+                    }
+                ],
+            }
+
+        pre_errors: list[dict] = []
+
+        # product_name -> (sheet row it was defined on, its field values).
+        products_by_name: dict[str, tuple[int, dict[str, str]]] = {}
+        for row_number, values in product_sheet_rows:
+            name = values.get("product_name", "").strip()
+            if not name:
+                pre_errors.append({"row_number": f"products row {row_number}", "errors": ["product_name is required"]})
+                continue
+            key = name.lower()
+            if key in products_by_name:
+                pre_errors.append({
+                    "row_number": f"products row {row_number}",
+                    "errors": [f"Duplicate product_name {name!r} (already defined in products row {products_by_name[key][0]})"],
+                })
+                continue
+            products_by_name[key] = (row_number, values)
+
+        rows: list[dict[str, str]] = []
+        row_labels: list[str] = []
+        used_products: set[str] = set()
+        for row_number, values in variant_sheet_rows:
+            name = values.get("product_name", "").strip()
+            if not name:
+                pre_errors.append({"row_number": f"variants row {row_number}", "errors": ["product_name is required"]})
+                continue
+            entry = products_by_name.get(name.lower())
+            if entry is None:
+                pre_errors.append({
+                    "row_number": f"variants row {row_number}",
+                    "errors": [f"product_name {name!r} not found in the products sheet"],
+                })
+                continue
+            used_products.add(name.lower())
+            rows.append({**entry[1], **values})
+            row_labels.append(f"variants row {row_number}")
+
+        for key, (row_number, values) in products_by_name.items():
+            if key not in used_products:
+                pre_errors.append({
+                    "row_number": f"products row {row_number}",
+                    "errors": [f"Product {values.get('product_name', '')!r} has no variant rows in the variants sheet"],
+                })
+
+        if pre_errors:
+            return {"success": False, "inserted_products": 0, "inserted_variants": 0, "errors": pre_errors}
+
+        result = AdminManagementService.bulk_upload_products_from_csv_rows(db, store_id, rows)
+        if result["errors"]:
+            # Service row_number is the 1-based position in `rows` (offset by
+            # 2 -- see enumerate(rows, start=2) above); translate it back to
+            # the sheet + row staff actually see.
+            result = {
+                **result,
+                "errors": [
+                    {
+                        "row_number": (
+                            row_labels[err["row_number"] - 2]
+                            if 0 <= err["row_number"] - 2 < len(row_labels)
+                            else f"row {err['row_number']}"
+                        ),
+                        "errors": err["errors"],
+                    }
+                    for err in result["errors"]
+                ],
+            }
+        return result
 
     @staticmethod
     def get_dashboard_summary(db: Session, store_id: UUID) -> dict:
