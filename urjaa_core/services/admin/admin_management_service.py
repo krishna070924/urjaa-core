@@ -1711,6 +1711,14 @@ class AdminManagementService:
                         stone_id=stone.stone_id,
                         quantity=stone.quantity,
                         total_carat_weight=stone.total_carat_weight,
+                        # cost feeds price (H-09) — dropping it would silently
+                        # reprice the copy. Certificate number/agency identify one
+                        # physical stone, so a copy doesn't inherit them.
+                        cost=stone.cost,
+                        cut=stone.cut,
+                        clarity=stone.clarity,
+                        color=stone.color,
+                        origin=stone.origin,
                     )
                 )
 
@@ -1738,6 +1746,9 @@ class AdminManagementService:
                 new_variant = ProductVariant(
                     store_id=store_id,
                     product_id=created.id,
+                    metal_id=variant.metal_id,
+                    size_value=variant.size_value,
+                    spec_note=variant.spec_note,
                     base_metal_id=variant.base_metal_id,
                     metal_color_id=variant.metal_color_id,
                     metal_purity_id=variant.metal_purity_id,
