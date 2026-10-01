@@ -9,7 +9,7 @@ from urjaa_core.models.product_stone import CERTIFICATION_AGENCIES
 
 
 ProductStatus = Literal["draft", "active", "hidden", "archived"]
-ProductGender = Literal["men", "women", "unisex"]
+ProductGender = Literal["men", "women", "unisex", "kids"]  # mirrors the genders table
 
 
 class ProductCreateVariantItem(BaseModel):
