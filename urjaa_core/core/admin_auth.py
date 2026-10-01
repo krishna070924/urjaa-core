@@ -274,7 +274,7 @@ ADMIN_ROUTE_PERMISSION_RULES: list[dict[str, Any]] = [
         "any_of": {ADMIN_PERMISSION_MANAGE_PRODUCTS},
     },
     {
-        "pattern": re.compile(r"^/admin/(categories|subcategories|collections|tags|stones|attributes|attribute-values|variant-types)(?:/.*)?$"),
+        "pattern": re.compile(r"^/admin/(categories|subcategories|collections|tags|stones)(?:/.*)?$"),
         "methods": WRITE_METHODS,
         "any_of": {ADMIN_PERMISSION_MANAGE_PRODUCTS},
     },
@@ -287,7 +287,7 @@ ADMIN_ROUTE_PERMISSION_RULES: list[dict[str, Any]] = [
     },
     # FIX 4.1: Add explicit GET permission rules for routes previously unprotected (fail-closed from Fix 1.3)
     {
-        "pattern": re.compile(r"^/admin/(categories|subcategories|collections|tags|stones|attributes|attribute-values|variant-types)(?:/.*)?$"),
+        "pattern": re.compile(r"^/admin/(categories|subcategories|collections|tags|stones)(?:/.*)?$"),
         "methods": {"GET"},
         "any_of": {ADMIN_PERMISSION_MANAGE_PRODUCTS, ADMIN_PERMISSION_MANAGE_INVENTORY, ADMIN_PERMISSION_MANAGE_WEBSITE},
     },
