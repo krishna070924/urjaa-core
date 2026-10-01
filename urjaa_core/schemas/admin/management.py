@@ -265,10 +265,14 @@ class MetalPurityUpdateRequest(BaseModel):
 
 
 class MetalColorCreateRequest(BaseModel):
+    # K-02 / D23: a colour belongs to one base metal (gold comes in yellow,
+    # white, rose; silver does not come in rose).
+    base_metal_id: int = Field(gt=0)
     name: str = Field(min_length=1, max_length=50)
 
 
 class MetalColorUpdateRequest(BaseModel):
+    base_metal_id: int | None = Field(default=None, gt=0)
     name: str | None = Field(default=None, min_length=1, max_length=50)
 
 
@@ -378,6 +382,7 @@ class AdminMetalColorLookupResponse(BaseModel):
     name: str
     # D23: lets the admin narrow colours to the chosen base metal.
     base_metal_id: int | None = None
+    base_metal_name: str | None = None
 
     class Config:
         orm_mode = True

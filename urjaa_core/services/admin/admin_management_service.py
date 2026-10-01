@@ -960,11 +960,15 @@ class AdminManagementService:
 
     @staticmethod
     def create_metal_color(db: Session, payload: MetalColorCreateRequest) -> MetalColor:
-        existing = AdminManagementRepository.get_metal_color_by_name(db, payload.name)
+        metal_type = AdminManagementRepository.get_metal_type_by_id(db, payload.base_metal_id)
+        if not metal_type:
+            raise HTTPException(status_code=404, detail="Metal type not found")
+
+        existing = AdminManagementRepository.get_metal_color_by_name(db, payload.name, payload.base_metal_id)
         if existing:
             raise HTTPException(status_code=409, detail="Metal color already exists")
 
-        metal_color = MetalColor(name=payload.name)
+        metal_color = MetalColor(name=payload.name, base_metal_id=payload.base_metal_id)
         try:
             created = AdminManagementRepository.create_metal_color(db, metal_color)
             db.commit()
@@ -979,10 +983,37 @@ class AdminManagementService:
         if not metal_color:
             raise HTTPException(status_code=404, detail="Metal color not found")
 
+        next_base_metal_id = payload.base_metal_id if payload.base_metal_id is not None else metal_color.base_metal_id
+        next_name = payload.name if payload.name is not None else metal_color.name
+
+        reassigning = payload.base_metal_id is not None and payload.base_metal_id != metal_color.base_metal_id
+        if reassigning:
+            metal_type = AdminManagementRepository.get_metal_type_by_id(db, payload.base_metal_id)
+            if not metal_type:
+                raise HTTPException(status_code=404, detail="Metal type not found")
+
+            # K-02: a colour's base metal can't change out from under a
+            # combination or variant that already relies on it under the
+            # current metal — that pairing would become invalid silently.
+            in_use = (
+                db.query(Metal.id).filter(Metal.metal_color_id == metal_color.id).first() is not None
+                or db.query(ProductVariant.id).filter(ProductVariant.metal_color_id == metal_color.id).first()
+                is not None
+            )
+            if in_use:
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"Metal color {metal_color.name!r} is in use under its current base metal "
+                    "and cannot be reassigned",
+                )
+
+        existing = AdminManagementRepository.get_metal_color_by_name(db, next_name, next_base_metal_id)
+        if existing and existing.id != metal_color.id:
+            raise HTTPException(status_code=409, detail="Metal color already exists")
+
+        if payload.base_metal_id is not None:
+            metal_color.base_metal_id = payload.base_metal_id
         if payload.name is not None:
-            existing = AdminManagementRepository.get_metal_color_by_name(db, payload.name)
-            if existing and existing.id != metal_color.id:
-                raise HTTPException(status_code=409, detail="Metal color already exists")
             metal_color.name = payload.name
 
         try:
