@@ -28,6 +28,7 @@ from urjaa_core.models.subcategory import Subcategory
 from urjaa_core.models.tag import Tag
 from urjaa_core.models.sale import Sale
 from urjaa_core.models.store import Store
+from urjaa_core.utils.excel_template import parse_bulk_upload_workbook
 from urjaa_core.repositories.admin.admin_management_repository import AdminManagementRepository
 from urjaa_core.schemas.admin.management import (
     CategoryCreateRequest,
@@ -662,6 +663,106 @@ class AdminManagementService:
         except Exception:
             db.rollback()
             raise
+
+    @staticmethod
+    def bulk_upload_products_from_xlsx(db: Session, store_id: UUID, content: bytes) -> dict:
+        """K-01: accept the downloaded .xlsx template directly, instead of
+        requiring staff to export a CSV first.
+
+        Reads the 'products' and 'variants' sheets (parse_bulk_upload_workbook
+        skips row EXAMPLE_ROW_NUMBER -- the template's filled-in example --
+        unconditionally), joins each variant row to its product by
+        product_name, and feeds the merged rows through
+        bulk_upload_products_from_csv_rows UNCHANGED -- metal/gender
+        resolution, SKU generation, every other rule stays defined in exactly
+        one place. Only the join itself (and the row-number translation back
+        to what staff see in Excel) is new here.
+        """
+        product_sheet_rows, variant_sheet_rows = parse_bulk_upload_workbook(content)
+
+        if not product_sheet_rows and not variant_sheet_rows:
+            return {
+                "success": False,
+                "inserted_products": 0,
+                "inserted_variants": 0,
+                "errors": [
+                    {
+                        "row_number": 1,
+                        "errors": [
+                            "No data rows found — fill in the products and variants sheets "
+                            "below the example row and try again"
+                        ],
+                    }
+                ],
+            }
+
+        pre_errors: list[dict] = []
+
+        # product_name -> (sheet row it was defined on, its field values).
+        products_by_name: dict[str, tuple[int, dict[str, str]]] = {}
+        for row_number, values in product_sheet_rows:
+            name = values.get("product_name", "").strip()
+            if not name:
+                pre_errors.append({"row_number": f"products row {row_number}", "errors": ["product_name is required"]})
+                continue
+            key = name.lower()
+            if key in products_by_name:
+                pre_errors.append({
+                    "row_number": f"products row {row_number}",
+                    "errors": [f"Duplicate product_name {name!r} (already defined in products row {products_by_name[key][0]})"],
+                })
+                continue
+            products_by_name[key] = (row_number, values)
+
+        rows: list[dict[str, str]] = []
+        row_labels: list[str] = []
+        used_products: set[str] = set()
+        for row_number, values in variant_sheet_rows:
+            name = values.get("product_name", "").strip()
+            if not name:
+                pre_errors.append({"row_number": f"variants row {row_number}", "errors": ["product_name is required"]})
+                continue
+            entry = products_by_name.get(name.lower())
+            if entry is None:
+                pre_errors.append({
+                    "row_number": f"variants row {row_number}",
+                    "errors": [f"product_name {name!r} not found in the products sheet"],
+                })
+                continue
+            used_products.add(name.lower())
+            rows.append({**entry[1], **values})
+            row_labels.append(f"variants row {row_number}")
+
+        for key, (row_number, values) in products_by_name.items():
+            if key not in used_products:
+                pre_errors.append({
+                    "row_number": f"products row {row_number}",
+                    "errors": [f"Product {values.get('product_name', '')!r} has no variant rows in the variants sheet"],
+                })
+
+        if pre_errors:
+            return {"success": False, "inserted_products": 0, "inserted_variants": 0, "errors": pre_errors}
+
+        result = AdminManagementService.bulk_upload_products_from_csv_rows(db, store_id, rows)
+        if result["errors"]:
+            # Service row_number is the 1-based position in `rows` (offset by
+            # 2 -- see enumerate(rows, start=2) above); translate it back to
+            # the sheet + row staff actually see.
+            result = {
+                **result,
+                "errors": [
+                    {
+                        "row_number": (
+                            row_labels[err["row_number"] - 2]
+                            if 0 <= err["row_number"] - 2 < len(row_labels)
+                            else f"row {err['row_number']}"
+                        ),
+                        "errors": err["errors"],
+                    }
+                    for err in result["errors"]
+                ],
+            }
+        return result
 
     @staticmethod
     def get_dashboard_summary(db: Session, store_id: UUID) -> dict:

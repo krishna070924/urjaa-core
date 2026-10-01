@@ -11,12 +11,18 @@ Sheet layout:
 
 import io
 import openpyxl
+from fastapi import HTTPException
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
 from sqlalchemy.orm import Session
 
 from urjaa_core.repositories.admin.admin_management_repository import AdminManagementRepository
 
+
+# K-01: row 2 of the products/variants sheets is always the filled-in example
+# -- real data starts here, regardless of what row 2 contains. Simpler and
+# more predictable than trying to detect "is this still the example row".
+EXAMPLE_ROW_NUMBER = 2
 
 _GOLD = "C9A14A"
 _DARK_BG = "111111"
@@ -179,7 +185,10 @@ def _build_instructions_sheet(wb: openpyxl.Workbook, db: Session):
     rules = [
         "Fill the 'products' sheet — one row per unique product.",
         "Fill the 'variants' sheet — one or more rows per product, linked by product_name.",
-        "Export the 'products' sheet as CSV before uploading (File → Save As → CSV).",
+        f"Upload this .xlsx file directly — no need to export to CSV (CSV uploads still work too, "
+        f"if you build your own one-sheet file).",
+        f"Row {EXAMPLE_ROW_NUMBER} of both sheets is a filled-in example. Uploading the .xlsx directly "
+        f"always ignores row {EXAMPLE_ROW_NUMBER} — enter your data starting at row {EXAMPLE_ROW_NUMBER + 1}.",
         "category_name must match a name in your catalog exactly (case-insensitive). No slug needed.",
         "subcategory_name is optional. If given, it must belong to the specified category.",
         "gender is optional — men, women, unisex or kids (case-insensitive). Leave blank for unisex.",
@@ -291,3 +300,60 @@ def generate_product_template(db: Session) -> bytes:
     wb.save(buf)
     buf.seek(0)
     return buf.read()
+
+
+def parse_bulk_upload_workbook(
+    content: bytes,
+) -> tuple[list[tuple[int, dict[str, str]]], list[tuple[int, dict[str, str]]]]:
+    """K-01: read an uploaded bulk-upload .xlsx (the file generate_product_template
+    produced, filled in) into raw (row_number, {header: value}) pairs for the
+    'products' and 'variants' sheets.
+
+    Row EXAMPLE_ROW_NUMBER (2) of each sheet is always skipped, regardless of
+    content -- it's the template's filled-in example; see the instructions
+    sheet. Values come back as stripped strings (same shape a CSV row
+    produces) so the caller can feed them straight into the existing
+    product_name-keyed joining and validation.
+
+    Raises HTTPException(400) for a file that isn't structurally the
+    template (unreadable, or missing a sheet) -- that's a different file,
+    not a data problem the normal per-row errors can describe.
+    """
+    try:
+        wb = openpyxl.load_workbook(io.BytesIO(content), data_only=True, read_only=True)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=400, detail="Could not read this .xlsx file — is it the downloaded template?"
+        ) from exc
+
+    try:
+        missing = [name for name in ("products", "variants") if name not in wb.sheetnames]
+        if missing:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Missing sheet(s): {', '.join(missing)} — download the current template and fill it in.",
+            )
+
+        def _sheet_rows(sheet_name: str) -> list[tuple[int, dict[str, str]]]:
+            ws = wb[sheet_name]
+            header_row = next(ws.iter_rows(min_row=1, max_row=1, values_only=True), ())
+            # _header_cell prefixes a required column with "* " -- strip it
+            # back off so the key matches the column name (e.g. "product_name").
+            headers = [str(cell).strip().lstrip("* ").strip() if cell is not None else "" for cell in header_row]
+
+            rows: list[tuple[int, dict[str, str]]] = []
+            data_rows = ws.iter_rows(min_row=EXAMPLE_ROW_NUMBER + 1, values_only=True)
+            for row_number, row in enumerate(data_rows, start=EXAMPLE_ROW_NUMBER + 1):
+                if all(cell is None or str(cell).strip() == "" for cell in row):
+                    continue
+                values = {
+                    headers[i]: ("" if cell is None else str(cell).strip())
+                    for i, cell in enumerate(row)
+                    if i < len(headers) and headers[i]
+                }
+                rows.append((row_number, values))
+            return rows
+
+        return _sheet_rows("products"), _sheet_rows("variants")
+    finally:
+        wb.close()

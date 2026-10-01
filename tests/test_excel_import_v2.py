@@ -16,6 +16,12 @@ Covers:
    report for why reject beats a per-row warning).
 6. generate_product_template(db) returns bytes whose instructions sheet
    lists current categories, metals and genders from the DB.
+7. bulk_upload_products_from_xlsx: fill the downloaded template (via
+   openpyxl) with one product + two variants and run it through the same
+   parsing path -> both variants created, metal/size resolved per row.
+8. bulk_upload_products_from_xlsx row errors name the sheet + row staff see
+   ("variants row 3", "products row 3"), for an orphaned variant row and a
+   product with no variant rows.
 
 Run: .venv/bin/python tests/test_excel_import_v2.py
 """
@@ -153,6 +159,45 @@ def main() -> None:
         assert "Unisex" in all_values, "genders missing from instructions sheet"
         assert any("Cocktail Rings" in v for v in all_values), "subcategories missing from instructions sheet"
         print(f"template generation                -> OK  {len(data)} bytes, instructions lists current catalog")
+
+        # --- 7. xlsx upload: fill the template via openpyxl, same parsing path ---
+        name_x = f"K01 XLSX Ring {suffix}"
+        wb = openpyxl.load_workbook(io.BytesIO(data))
+        # Row 2 is the template's example row and is always skipped; real
+        # data starts at row 3 -- wb.append() lands there on a fresh template.
+        wb["products"].append([name_x, "Rings", "Cocktail Rings", "Women", "", "active", "", ""])
+        wb["variants"].append([name_x, "", "22K Yellow Gold", "7", "", "5", "1000", "", "2"])
+        wb["variants"].append([name_x, "", "18K White Gold", "8", "", "4.5", "900", "", "1"])
+        buf = io.BytesIO()
+        wb.save(buf)
+
+        result = svc.bulk_upload_products_from_xlsx(db, store.id, buf.getvalue())
+        assert result["success"] and result["inserted_products"] == 1 and result["inserted_variants"] == 2, result
+
+        product_x = db.query(Product).filter(Product.name == name_x).one()
+        variants_x = db.query(ProductVariant).filter(ProductVariant.product_id == product_x.id).all()
+        assert len(variants_x) == 2, variants_x
+        assert product_x.gender.name == "Women", product_x.gender.name
+        assert sorted(v.metal.display_name for v in variants_x) == ["18K White Gold", "22K Yellow Gold"], variants_x
+        assert sorted(v.stock_quantity for v in variants_x) == [1, 2], variants_x
+        print(f"xlsx upload (template + openpyxl fill) -> OK  2 variants, metals+gender resolved")
+
+        # --- 8. xlsx row errors use the sheet + row staff see ---
+        wb2 = openpyxl.load_workbook(io.BytesIO(data))
+        wb2["products"].append([f"K01 XLSX Lonely {suffix}", "Rings", "", "", "", "draft", "", ""])
+        wb2["variants"].append([f"K01 XLSX Orphan {suffix}", "", "", "", "", "", "", "", ""])
+        buf2 = io.BytesIO()
+        wb2.save(buf2)
+
+        result2 = svc.bulk_upload_products_from_xlsx(db, store.id, buf2.getvalue())
+        assert not result2["success"], result2
+        labels = {str(e["row_number"]) for e in result2["errors"]}
+        assert any(label.startswith("variants row") for label in labels), labels
+        assert any(label.startswith("products row") for label in labels), labels
+        all_msgs = " ".join(e["errors"][0] for e in result2["errors"])
+        assert "not found in the products sheet" in all_msgs, all_msgs
+        assert "no variant rows" in all_msgs, all_msgs
+        print(f"xlsx row errors name sheet + row       -> OK  {sorted(labels)}")
 
         print("ALL OK")
     finally:
