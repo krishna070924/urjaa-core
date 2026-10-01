@@ -10,14 +10,11 @@ from sqlalchemy.orm import Session
 
 from urjaa_core.models.product import Product
 from urjaa_core.models.product_image import ProductImage
-from urjaa_core.models.product_attribute import ProductAttribute
 from urjaa_core.models.product_collection import ProductCollection
 from urjaa_core.models.product_tag import ProductTag
 from urjaa_core.models.product_stone import ProductStone
 from urjaa_core.models.product_variant import ProductVariant
 from urjaa_core.services import physical_unit_service
-from urjaa_core.models.attribute import Attribute
-from urjaa_core.models.attribute_value import AttributeValue
 from urjaa_core.models.base_metal import BaseMetal
 from urjaa_core.models.category import Category
 from urjaa_core.models.collection import Collection
@@ -29,16 +26,10 @@ from urjaa_core.models.metal_rate import MetalRate
 from urjaa_core.models.stone import Stone
 from urjaa_core.models.subcategory import Subcategory
 from urjaa_core.models.tag import Tag
-from urjaa_core.models.variant_type import VariantType
-from urjaa_core.models.variant_attribute import VariantAttribute
 from urjaa_core.models.sale import Sale
 from urjaa_core.models.store import Store
 from urjaa_core.repositories.admin.admin_management_repository import AdminManagementRepository
 from urjaa_core.schemas.admin.management import (
-    AttributeCreateRequest,
-    AttributeUpdateRequest,
-    AttributeValueCreateRequest,
-    AttributeValueUpdateRequest,
     CategoryCreateRequest,
     CategoryUpdateRequest,
     CollectionCreateRequest,
@@ -62,8 +53,6 @@ from urjaa_core.schemas.admin.management import (
     SubcategoryUpdateRequest,
     TagCreateRequest,
     TagUpdateRequest,
-    VariantTypeCreateRequest,
-    VariantTypeUpdateRequest,
     VariantCreateRequest,
     VariantUpdateRequest,
 )
@@ -73,14 +62,7 @@ logger = logging.getLogger(__name__)
 
 
 class AdminManagementService:
-    GENDER_ATTRIBUTE_SLUG = "gender"
-    GENDER_ATTRIBUTE_NAME = "Gender"
     DEFAULT_GENDER_KEY = "unisex"
-    GENDER_VALUE_MAP = {
-        "men": "Men",
-        "women": "Women",
-        "unisex": "Unisex",
-    }
 
     VARIANT_CONSTRAINT_MESSAGES = {
         "chk_variant_weight_positive": (
@@ -131,39 +113,6 @@ class AdminManagementService:
         if row is None:
             raise AdminManagementService._field_error("gender", f"Unknown gender: {gender!r}")
         return row.id
-
-    @staticmethod
-    def _ensure_gender_attribute_values(db: Session) -> tuple[Attribute, dict[str, AttributeValue]]:
-        attribute = AdminManagementRepository.get_attribute_by_slug(db, AdminManagementService.GENDER_ATTRIBUTE_SLUG)
-        if not attribute:
-            attribute = AdminManagementRepository.create_attribute(
-                db,
-                Attribute(
-                    name=AdminManagementService.GENDER_ATTRIBUTE_NAME,
-                    slug=AdminManagementService.GENDER_ATTRIBUTE_SLUG,
-                    filterable=True,
-                ),
-            )
-        elif not attribute.filterable:
-            attribute.filterable = True
-
-        existing_values: dict[str, AttributeValue] = {}
-        for existing in attribute.values or []:
-            key = (existing.value or "").strip().lower()
-            if key:
-                existing_values[key] = existing
-
-        for key, label in AdminManagementService.GENDER_VALUE_MAP.items():
-            if key in existing_values:
-                continue
-
-            created = AdminManagementRepository.create_attribute_value(
-                db,
-                AttributeValue(attribute_id=attribute.id, value=label),
-            )
-            existing_values[key] = created
-
-        return attribute, existing_values
 
     @staticmethod
     def get_products_global(db: Session, page: int = 1, limit: int = 200, search: str | None = None) -> tuple[list[dict], int]:
@@ -344,10 +293,6 @@ class AdminManagementService:
                 ProductTag.product_id.in_(product_ids_query)
             ).delete(synchronize_session=False)
 
-            deleted_product_attributes_count = db.query(ProductAttribute).filter(
-                ProductAttribute.product_id.in_(product_ids_query)
-            ).delete(synchronize_session=False)
-
             deleted_products_count = db.query(Product).filter(
                 Product.store_id == store_id
             ).delete(synchronize_session=False)
@@ -359,7 +304,7 @@ class AdminManagementService:
                 raise HTTPException(status_code=404, detail="Store not found")
 
             logger.info(
-                "force_delete_store deleting_store_id=%s deleted_products_count=%s deleted_sales_count=%s deleted_images_count=%s deleted_variants_count=%s deleted_stones_count=%s deleted_collections_count=%s deleted_tags_count=%s deleted_attributes_count=%s deleted_customers_count=%s",
+                "force_delete_store deleting_store_id=%s deleted_products_count=%s deleted_sales_count=%s deleted_images_count=%s deleted_variants_count=%s deleted_stones_count=%s deleted_collections_count=%s deleted_tags_count=%s deleted_customers_count=%s",
                 store_id,
                 deleted_products_count,
                 deleted_sales_count,
@@ -368,7 +313,6 @@ class AdminManagementService:
                 deleted_product_stones_count,
                 deleted_product_collections_count,
                 deleted_product_tags_count,
-                deleted_product_attributes_count,
                 deleted_customers_count,
             )
 
@@ -793,11 +737,6 @@ class AdminManagementService:
             lambda candidate: AdminManagementRepository.get_subcategory_by_slug(db, candidate) is not None,
         )
 
-        if payload.default_variant_type_id is not None:
-            variant_type = AdminManagementRepository.get_variant_type_by_id(db, payload.default_variant_type_id)
-            if not variant_type:
-                raise HTTPException(status_code=404, detail="Variant type not found")
-
         if payload.size_unit and not payload.size_label:
             raise AdminManagementService._field_error("size_unit", "size_unit requires size_label")
 
@@ -805,7 +744,6 @@ class AdminManagementService:
             category_id=payload.category_id,
             name=name,
             slug=slug,
-            default_variant_type_id=payload.default_variant_type_id,
             size_label=payload.size_label,
             size_unit=payload.size_unit,
         )
@@ -841,12 +779,6 @@ class AdminManagementService:
                     ),
                 )
 
-        if payload.default_variant_type_id is not None:
-            variant_type = AdminManagementRepository.get_variant_type_by_id(db, payload.default_variant_type_id)
-            if not variant_type:
-                raise HTTPException(status_code=404, detail="Variant type not found")
-            subcategory.default_variant_type_id = payload.default_variant_type_id
-
         if payload.size_label is not None:
             subcategory.size_label = payload.size_label
         if payload.size_unit is not None:
@@ -880,110 +812,6 @@ class AdminManagementService:
             raise
 
     @staticmethod
-    def get_variant_types(db: Session) -> list[VariantType]:
-        return AdminManagementRepository.get_variant_types(db)
-
-    @staticmethod
-    def create_variant_type(db: Session, payload: VariantTypeCreateRequest) -> VariantType:
-        name = payload.name.strip()
-        slug = AdminManagementService._unique_slug(
-            AdminManagementService._slugify(name),
-            lambda candidate: AdminManagementRepository.get_variant_type_by_slug(db, candidate) is not None,
-        )
-
-        attribute_ids = list(dict.fromkeys(payload.attribute_ids or []))
-        if attribute_ids:
-            attributes = AdminManagementRepository.get_attributes_by_ids(db, attribute_ids)
-            if len(attributes) != len(attribute_ids):
-                raise HTTPException(status_code=400, detail="One or more attribute ids are invalid")
-
-        variant_type = VariantType(
-            name=name,
-            slug=slug,
-            description=payload.description,
-            display_order=payload.display_order,
-        )
-
-        try:
-            created = AdminManagementRepository.create_variant_type(db, variant_type)
-            AdminManagementRepository.replace_variant_type_attributes(db, created.id, attribute_ids)
-            db.commit()
-            db.refresh(created)
-            return created
-        except Exception:
-            db.rollback()
-            raise
-
-    @staticmethod
-    def update_variant_type(db: Session, variant_type_id: int, payload: VariantTypeUpdateRequest) -> VariantType:
-        variant_type = AdminManagementRepository.get_variant_type_by_id(db, variant_type_id)
-        if not variant_type:
-            raise HTTPException(status_code=404, detail="Variant type not found")
-
-        if payload.name is not None:
-            next_name = payload.name.strip()
-            if next_name != variant_type.name:
-                variant_type.name = next_name
-                variant_type.slug = AdminManagementService._unique_slug(
-                    AdminManagementService._slugify(next_name),
-                    lambda candidate: (
-                        (existing := AdminManagementRepository.get_variant_type_by_slug(db, candidate)) is not None
-                        and existing.id != variant_type.id
-                    ),
-                )
-
-        for field in ["description", "display_order"]:
-            value = getattr(payload, field)
-            if value is not None:
-                setattr(variant_type, field, value)
-
-        if payload.attribute_ids is not None:
-            attribute_ids = list(dict.fromkeys(payload.attribute_ids))
-            if attribute_ids:
-                attributes = AdminManagementRepository.get_attributes_by_ids(db, attribute_ids)
-                if len(attributes) != len(attribute_ids):
-                    raise HTTPException(status_code=400, detail="One or more attribute ids are invalid")
-            AdminManagementRepository.replace_variant_type_attributes(db, variant_type.id, attribute_ids)
-
-        try:
-            AdminManagementRepository.update_variant_type(db, variant_type)
-            db.commit()
-            db.refresh(variant_type)
-            return variant_type
-        except Exception:
-            db.rollback()
-            raise
-
-    @staticmethod
-    def get_variant_type_attributes(db: Session, variant_type_id: int) -> list[Attribute]:
-        variant_type = AdminManagementRepository.get_variant_type_by_id(db, variant_type_id)
-        if not variant_type:
-            raise HTTPException(status_code=404, detail="Variant type not found")
-        return [link.attribute for link in variant_type.attributes if link.attribute is not None]
-
-    @staticmethod
-    def delete_variant_type(db: Session, variant_type_id: int) -> None:
-        variant_type = AdminManagementRepository.get_variant_type_by_id(db, variant_type_id)
-        if not variant_type:
-            raise HTTPException(status_code=404, detail="Variant type not found")
-
-        try:
-            # variant_type_attributes.variant_type_id is ON DELETE SET NULL, not
-            # CASCADE - without this, deleting the VariantType leaves orphaned
-            # variant_type_attributes rows (variant_type_id=NULL) that still
-            # point at their attribute_id, permanently blocking that Attribute
-            # from ever being deleted. Clear the junction explicitly first.
-            AdminManagementRepository.replace_variant_type_attributes(db, variant_type_id, [])
-            AdminManagementRepository.delete_variant_type(db, variant_type)
-            db.commit()
-        except IntegrityError:
-            db.rollback()
-            raise HTTPException(status_code=409, detail="Variant type is in use and cannot be deleted")
-        except Exception:
-            db.rollback()
-            raise
-
-    @staticmethod
     def get_collections(db: Session) -> list[Collection]:
         return AdminManagementRepository.get_collections(db)
 
@@ -994,10 +822,6 @@ class AdminManagementService:
     @staticmethod
     def get_stones(db: Session) -> list[Stone]:
         return AdminManagementRepository.get_stones(db)
-
-    @staticmethod
-    def get_attributes(db: Session) -> list[Attribute]:
-        return AdminManagementRepository.get_attributes(db)
 
     @staticmethod
     def get_metal_purities(db: Session) -> list[MetalPurity]:
@@ -1579,138 +1403,6 @@ class AdminManagementService:
             raise
 
     @staticmethod
-    def create_attribute(db: Session, payload: AttributeCreateRequest) -> Attribute:
-        name = payload.name.strip()
-        slug = AdminManagementService._unique_slug(
-            AdminManagementService._slugify(name),
-            lambda candidate: AdminManagementRepository.get_attribute_by_slug(db, candidate) is not None,
-        )
-
-        attribute = Attribute(name=name, slug=slug, filterable=payload.filterable)
-        try:
-            created = AdminManagementRepository.create_attribute(db, attribute)
-            db.commit()
-            return created
-        except Exception:
-            db.rollback()
-            raise
-
-    @staticmethod
-    def update_attribute(db: Session, attribute_id: int, payload: AttributeUpdateRequest) -> Attribute:
-        attribute = AdminManagementRepository.get_attribute_by_id(db, attribute_id)
-        if not attribute:
-            raise HTTPException(status_code=404, detail="Attribute not found")
-
-        if payload.name is not None:
-            next_name = payload.name.strip()
-            if next_name != attribute.name:
-                attribute.name = next_name
-                attribute.slug = AdminManagementService._unique_slug(
-                    AdminManagementService._slugify(next_name),
-                    lambda candidate: (
-                        (existing := AdminManagementRepository.get_attribute_by_slug(db, candidate)) is not None
-                        and existing.id != attribute.id
-                    ),
-                )
-
-        for field in ["filterable"]:
-            value = getattr(payload, field)
-            if value is not None:
-                setattr(attribute, field, value)
-
-        try:
-            db.commit()
-            db.refresh(attribute)
-            return attribute
-        except Exception:
-            db.rollback()
-            raise
-
-    @staticmethod
-    def delete_attribute(db: Session, attribute_id: int) -> None:
-        attribute = AdminManagementRepository.get_attribute_by_id(db, attribute_id)
-        if not attribute:
-            raise HTTPException(status_code=404, detail="Attribute not found")
-
-        try:
-            AdminManagementRepository.delete_attribute(db, attribute)
-            db.commit()
-        except IntegrityError:
-            db.rollback()
-            raise HTTPException(status_code=409, detail="Attribute is in use and cannot be deleted")
-        except Exception:
-            db.rollback()
-            raise
-
-    @staticmethod
-    def get_attribute_values(db: Session) -> list:
-        return AdminManagementRepository.get_attribute_values(db)
-
-    @staticmethod
-    def create_attribute_value(db: Session, payload: AttributeValueCreateRequest) -> AttributeValue:
-        attribute = AdminManagementRepository.get_attribute_by_id(db, payload.attribute_id)
-        if not attribute:
-            raise HTTPException(status_code=404, detail="Attribute not found")
-
-        existing = AdminManagementRepository.get_attribute_value_by_attribute_and_value(db, payload.attribute_id, payload.value)
-        if existing:
-            raise HTTPException(status_code=409, detail="Attribute value already exists")
-
-        value = AttributeValue(attribute_id=payload.attribute_id, value=payload.value)
-        try:
-            created = AdminManagementRepository.create_attribute_value(db, value)
-            db.commit()
-            return created
-        except Exception:
-            db.rollback()
-            raise
-
-    @staticmethod
-    def update_attribute_value(db: Session, value_id: int, payload: AttributeValueUpdateRequest) -> AttributeValue:
-        value = AdminManagementRepository.get_attribute_value_by_id(db, value_id)
-        if not value:
-            raise HTTPException(status_code=404, detail="Attribute value not found")
-
-        target_attribute_id = payload.attribute_id if payload.attribute_id is not None else value.attribute_id
-        target_value = payload.value if payload.value is not None else value.value
-        existing = AdminManagementRepository.get_attribute_value_by_attribute_and_value(db, target_attribute_id, target_value)
-        if existing and existing.id != value.id:
-            raise HTTPException(status_code=409, detail="Attribute value already exists")
-
-        if payload.attribute_id is not None:
-            attribute = AdminManagementRepository.get_attribute_by_id(db, payload.attribute_id)
-            if not attribute:
-                raise HTTPException(status_code=404, detail="Attribute not found")
-            value.attribute_id = payload.attribute_id
-
-        if payload.value is not None:
-            value.value = payload.value
-
-        try:
-            db.commit()
-            db.refresh(value)
-            return value
-        except Exception:
-            db.rollback()
-            raise
-
-    @staticmethod
-    def delete_attribute_value(db: Session, value_id: int) -> None:
-        value = AdminManagementRepository.get_attribute_value_by_id(db, value_id)
-        if not value:
-            raise HTTPException(status_code=404, detail="Attribute value not found")
-
-        try:
-            AdminManagementRepository.delete_attribute_value(db, value)
-            db.commit()
-        except IntegrityError:
-            db.rollback()
-            raise HTTPException(status_code=409, detail="Attribute value is in use and cannot be deleted")
-        except Exception:
-            db.rollback()
-            raise
-
-    @staticmethod
     def create_metal_rate(db: Session, payload: MetalRateCreateRequest) -> MetalRate:
         metal_type = AdminManagementRepository.get_metal_type_by_id(db, payload.base_metal_id)
         if not metal_type:
@@ -2012,9 +1704,6 @@ class AdminManagementService:
             created.collections = list(source.collections)
             created.tags = list(source.tags)
 
-            for attr in source.attributes:
-                db.add(ProductAttribute(product_id=created.id, attribute_value_id=attr.attribute_value_id))
-
             for stone in source.stones:
                 db.add(
                     ProductStone(
@@ -2069,14 +1758,6 @@ class AdminManagementService:
                     # so the source note would be actively misleading if copied.
                 )
                 AdminManagementRepository.create_variant(db, new_variant)
-
-                for variant_attribute in variant.attribute_values:
-                    db.add(
-                        VariantAttribute(
-                            variant_id=new_variant.id,
-                            attribute_value_id=variant_attribute.attribute_value_id,
-                        )
-                    )
 
             db.commit()
             db.refresh(created)
@@ -2152,32 +1833,6 @@ class AdminManagementService:
         except Exception:
             db.rollback()
             raise
-
-    @staticmethod
-    def _validate_variant_attribute_value_ids(db: Session, attribute_value_ids: list[int]) -> list[AttributeValue]:
-        """A variant can't carry two different values of the same Attribute
-        (e.g. Ring Size 6 and Ring Size 7 at once). Returns the resolved,
-        de-duplicated AttributeValue rows for the caller to persist."""
-        normalized_ids = list(dict.fromkeys(attribute_value_ids or []))
-        if not normalized_ids:
-            return []
-
-        values = AdminManagementRepository.get_attribute_values_by_ids(db, normalized_ids)
-        if len(values) != len(normalized_ids):
-            raise HTTPException(status_code=400, detail="One or more attribute value ids are invalid")
-
-        seen_attributes: dict[int, AttributeValue] = {}
-        for value in values:
-            collision = seen_attributes.get(value.attribute_id)
-            if collision is not None:
-                attribute_name = value.attribute.name if value.attribute else str(value.attribute_id)
-                raise AdminManagementService._field_error(
-                    "attribute_value_ids",
-                    f"Variant cannot have two values for attribute '{attribute_name}'",
-                )
-            seen_attributes[value.attribute_id] = value
-
-        return values
 
     @staticmethod
     def _validate_metal_colour_pairing(metal_color, base_metal_id) -> None:
@@ -2266,10 +1921,6 @@ class AdminManagementService:
                 detail=f"SKU {sku_code} is already used by another item. Change it, or leave SKU blank to generate one.",
             )
 
-        attribute_values = AdminManagementService._validate_variant_attribute_value_ids(
-            db, payload.attribute_value_ids
-        )
-
         if payload.base_metal_id is not None:
             metal_type = AdminManagementRepository.get_metal_type_by_id(db, payload.base_metal_id)
             if not metal_type:
@@ -2332,9 +1983,6 @@ class AdminManagementService:
 
         try:
             created = AdminManagementRepository.create_variant(db, variant)
-            AdminManagementRepository.replace_variant_attributes(
-                db, created.id, [value.id for value in attribute_values]
-            )
             db.commit()
             db.refresh(created)
             return created
@@ -2383,10 +2031,6 @@ class AdminManagementService:
             metal_purity = AdminManagementRepository.get_metal_purity_by_id(db, payload.metal_purity_id)
             if not metal_purity:
                 raise HTTPException(status_code=404, detail="Metal purity not found")
-
-        attribute_values = AdminManagementService._validate_variant_attribute_value_ids(
-            db, payload.attribute_value_ids
-        )
 
         for field in [
             "base_metal_id",
@@ -2443,9 +2087,6 @@ class AdminManagementService:
             )
 
         try:
-            AdminManagementRepository.replace_variant_attributes(
-                db, variant.id, [value.id for value in attribute_values]
-            )
             db.commit()
             db.refresh(variant)
             return variant
@@ -2633,45 +2274,6 @@ class AdminManagementService:
 
         try:
             product.tags = tags
-            db.commit()
-            db.refresh(product)
-            return product
-        except Exception:
-            db.rollback()
-            raise
-
-    @staticmethod
-    def update_product_attributes(db: Session, store_id: UUID, product_id: UUID, ids: list[int]) -> Product:
-        product = AdminManagementRepository.get_product_by_id(db, product_id, store_id=store_id)
-        if not product:
-            raise HTTPException(status_code=404, detail="Product not found")
-
-        normalized_ids = list(dict.fromkeys(ids))
-        attribute_values = AdminManagementRepository.get_attribute_values_by_ids(db, normalized_ids)
-        if len(attribute_values) != len(normalized_ids):
-            raise HTTPException(status_code=400, detail="One or more attribute value ids are invalid")
-
-        gender_attribute, gender_values = AdminManagementService._ensure_gender_attribute_values(db)
-        default_gender = gender_values.get(AdminManagementService.DEFAULT_GENDER_KEY)
-        if default_gender is None:
-            raise HTTPException(status_code=500, detail="Default gender attribute value is not configured")
-
-        selected_gender_ids = {
-            value.id
-            for value in attribute_values
-            if value.attribute_id == gender_attribute.id
-        }
-
-        final_ids = [value_id for value_id in normalized_ids if value_id not in selected_gender_ids]
-
-        selected_gender_id = next(
-            (value_id for value_id in normalized_ids if value_id in selected_gender_ids),
-            default_gender.id,
-        )
-        final_ids.append(selected_gender_id)
-
-        try:
-            AdminManagementRepository.replace_product_attributes(db, product_id, final_ids)
             db.commit()
             db.refresh(product)
             return product
