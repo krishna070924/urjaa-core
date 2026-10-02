@@ -28,6 +28,12 @@ class ProductReviewsResponse(BaseModel):
     average_rating: float
     total_count: int
     rating_breakdown: dict[int, int]
+    # L-02: which `rating` filter (1-5), if any, the `items`/`page`/`pages`
+    # below were computed under. average_rating/total_count/rating_breakdown
+    # are always over ALL approved reviews, never the filtered subset -- a
+    # filter narrows the list, not the product's overall standing.
+    rating_filter: int | None
+    filtered_count: int
     items: list[ProductReviewPublicResponse]
     page: int
     limit: int
