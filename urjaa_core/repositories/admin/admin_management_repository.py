@@ -707,6 +707,9 @@ class AdminManagementRepository:
         limit: int,
         store_id: UUID | None = None,
         search: str | None = None,
+        category_id: int | None = None,
+        subcategory_id: int | None = None,
+        collection_id: int | None = None,
     ) -> tuple[list[Product], int]:
         offset = (page - 1) * limit
         query = (
@@ -736,6 +739,17 @@ class AdminManagementRepository:
                     func.lower(Category.name).like(pattern),
                 )
             )
+
+        if category_id is not None:
+            query = query.filter(Category.id == category_id)
+
+        if subcategory_id is not None:
+            query = query.filter(Product.subcategory_id == subcategory_id)
+
+        if collection_id is not None:
+            query = query.join(
+                ProductCollection, ProductCollection.product_id == Product.id
+            ).filter(ProductCollection.collection_id == collection_id)
 
         total = query.count()
         items = query.offset(offset).limit(limit).all()
