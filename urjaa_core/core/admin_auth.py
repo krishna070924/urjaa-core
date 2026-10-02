@@ -396,6 +396,19 @@ ADMIN_ROUTE_PERMISSION_RULES: list[dict[str, Any]] = [
         "any_of": {ADMIN_PERMISSION_MANAGE_CMS, ADMIN_PERMISSION_MANAGE_PRODUCTS},
     },
     {
+        # N-03: hero video upload, same permission bucket as upload-image.
+        "pattern": re.compile(r"^/admin/upload-video$"),
+        "methods": {"POST"},
+        "any_of": {ADMIN_PERMISSION_MANAGE_CMS, ADMIN_PERMISSION_MANAGE_PRODUCTS},
+    },
+    {
+        # N-03: Home/Our Story CMS content — ticket calls for the
+        # "manage website" permission specifically (not manage_cms).
+        "pattern": re.compile(r"^/admin/cms(?:/.*)?$"),
+        "methods": None,
+        "any_of": {ADMIN_PERMISSION_MANAGE_WEBSITE},
+    },
+    {
         "pattern": re.compile(r"^/admin/legal-pages(?:/.*)?$"),
         "methods": None,
         "any_of": {ADMIN_PERMISSION_MANAGE_CMS},
