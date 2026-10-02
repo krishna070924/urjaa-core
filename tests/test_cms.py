@@ -75,6 +75,20 @@ def test_valid_save_round_trips(db: Session, store_id) -> None:
     print("valid save round-trips                          OK")
 
 
+def test_partial_home_save(db: Session, store_id) -> None:
+    """Staff can save just one section: no hero, no collection/stone tiles."""
+    pid = _make_product(db, store_id, price_override="9000.00")
+    content, _ = cms_service.save_page(db, "home", {"best_sellers": {"product_ids": [str(pid)]}}, saved_by="tester@urjaa.test")
+    assert content["hero"] is None and content["curated_collections"]["tiles"] == [], content
+    bad = {"stone_stories": {"tiles": [{"stone_id": 4, "image_url": None}]}}
+    try:
+        cms_service.save_page(db, "home", bad, saved_by="tester@urjaa.test")
+        raise AssertionError("1 stone tile should be rejected (0 or 4 only)")
+    except HTTPException as exc:
+        assert exc.status_code == 422, exc.detail
+    print("partial Home save; 1 of 4 tiles rejected        OK")
+
+
 def test_text_field_on_home_rejected(db: Session) -> None:
     payload = _home_payload([])
     payload["hero"]["caption"] = "Not allowed under D38"
@@ -187,6 +201,7 @@ def main() -> None:
         assert store is not None, "dev DB needs at least one store"
 
         test_valid_save_round_trips(db, store.id)
+        test_partial_home_save(db, store.id)
         test_text_field_on_home_rejected(db)
         test_foreign_url_rejected(db)
         test_sixth_save_keeps_only_five_versions(db, store.id)

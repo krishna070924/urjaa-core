@@ -304,7 +304,7 @@ def resolve_home_for_storefront(db: Session) -> dict[str, Any]:
     collections_by_id = _resolve_collections(db, collection_ids)
 
     return {
-        "hero": content.hero.model_dump(mode="json"),
+        "hero": content.hero.model_dump(mode="json") if content.hero else None,
         "shop_by_category": [
             {**categories_by_id[tile.category_id], "image": tile.image_url}
             for tile in content.shop_by_category
