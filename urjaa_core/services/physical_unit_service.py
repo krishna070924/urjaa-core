@@ -166,4 +166,8 @@ def _flush_or_duplicate_huid(db: Session) -> None:
         db.rollback()
         if "uq_variant_physical_units_huid" in str(exc):
             raise HTTPException(status_code=409, detail="That HUID is already recorded on another piece") from exc
+        if "uq_variant_physical_units_serial_per_variant" in str(exc):
+            raise HTTPException(
+                status_code=409, detail="That serial number is already recorded on another piece of this item"
+            ) from exc
         raise

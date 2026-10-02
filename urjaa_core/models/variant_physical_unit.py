@@ -28,6 +28,11 @@ class VariantPhysicalUnit(Base):
     variant_id = Column(UUID(as_uuid=True), ForeignKey("product_variants.id", ondelete="CASCADE"), nullable=False, index=True)
     status_id = Column(Integer, ForeignKey("unit_statuses.id"), nullable=False)
     huid_number = Column(String(50), nullable=True)
+    # N-01/D37: for pieces that carry no HUID (watches, and other non-hallmarked
+    # gifting items) — a free-text serial instead. Unique per variant, not
+    # globally: unlike a BIS HUID, a watch serial is only unique within its own
+    # brand/model, so two unrelated variants could legitimately share one.
+    serial_number = Column(String(100), nullable=True)
     weight_grams = Column(DECIMAL(10, 3), nullable=True)
     location_note = Column(Text, nullable=True)
     # Which online order line reserved it / which in-store sale sold it.
