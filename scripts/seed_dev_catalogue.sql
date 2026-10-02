@@ -90,10 +90,14 @@ INSERT INTO stones (name, stone_group) VALUES
   ('Pearl','Organic'), ('Amethyst','Semi-precious'), ('Citrine','Semi-precious'),
   ('Garnet','Semi-precious');
 
+-- M-02: Bridal/Festive/Everyday back the storefront's "Shop by Occasion"
+-- menu (?tag=<slug>); "Gifting" in that menu reuses the existing Gift tag
+-- rather than adding a near-duplicate.
 INSERT INTO tags (name, slug) VALUES
   ('New Arrival','new-arrival'), ('Bestseller','bestseller'), ('Sale','sale'),
   ('Featured','featured'), ('Handcrafted','handcrafted'),
-  ('Lightweight','lightweight'), ('Gift','gift');
+  ('Lightweight','lightweight'), ('Gift','gift'),
+  ('Bridal','bridal'), ('Festive','festive'), ('Everyday','everyday');
 
 -- Names from the storefront design's collections nav.
 INSERT INTO collections (name, slug, description, is_featured, display_order) VALUES
