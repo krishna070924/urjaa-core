@@ -104,10 +104,67 @@ def test_generated_name_ignores_client_filename() -> None:
         assert (Path(tmp) / "urjaa" / "products" / saved_name).is_file()
 
 
+# =============================================================================
+# N-03: hero video upload (MP4/WebM magic-byte sniff)
+# =============================================================================
+
+def _mp4_bytes() -> bytes:
+    # Minimal fake MP4: a box size (don't care), then the 'ftyp' box type at
+    # offset 4 — that's all the sniff looks at.
+    return b"\x00\x00\x00\x18ftyp" + b"isom" + b"\x00" * 16
+
+
+def _webm_bytes() -> bytes:
+    # EBML magic number WebM/Matroska containers start with.
+    return b"\x1a\x45\xdf\xa3" + b"\x00" * 32
+
+
+def test_valid_videos_saved_with_correct_url() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        service = _service(Path(tmp))
+        for make_bytes, ext in [(_mp4_bytes, "mp4"), (_webm_bytes, "webm")]:
+            result = asyncio.run(
+                service.upload_video(file_bytes=make_bytes(), filename="whatever.exe", folder="urjaa/cms")
+            )
+            assert result["url"].startswith("http://localhost:8000/media/urjaa/cms/")
+            assert result["url"].endswith(f".{ext}")
+            saved_name = result["url"].rsplit("/", 1)[-1]
+            assert (Path(tmp) / "urjaa" / "cms" / saved_name).is_file()
+
+
+def test_non_video_bytes_rejected_even_with_video_content_type() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        service = _service(Path(tmp))
+        _expect_rejected(
+            service.upload_video(file_bytes=b"not actually a video", filename="fake.mp4", folder="urjaa/cms")
+        )
+
+
+def test_oversized_video_rejected() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        service = _service(Path(tmp))
+        oversized = _mp4_bytes() + b"\x00" * (25 * 1024 * 1024)
+        _expect_rejected(service.upload_video(file_bytes=oversized, filename="big.mp4", folder="urjaa/cms"))
+
+
+def test_video_folder_allow_list_enforced() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        service = _service(Path(tmp))
+        # Image folders are not valid video destinations, and vice versa is
+        # enforced by `upload()`'s own allow-list (unchanged above).
+        _expect_rejected(
+            service.upload_video(file_bytes=_mp4_bytes(), filename="x.mp4", folder="urjaa/products")
+        )
+
+
 if __name__ == "__main__":
     test_valid_images_saved_with_correct_url()
     test_non_image_bytes_rejected_even_with_image_content_type()
     test_oversized_upload_rejected()
     test_folder_traversal_rejected()
     test_generated_name_ignores_client_filename()
+    test_valid_videos_saved_with_correct_url()
+    test_non_video_bytes_rejected_even_with_video_content_type()
+    test_oversized_video_rejected()
+    test_video_folder_allow_list_enforced()
     print("ok")
