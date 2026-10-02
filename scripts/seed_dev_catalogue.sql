@@ -117,4 +117,36 @@ FROM stores s,
         ('Khan Market','New Delhi','Delhi','110003','+91 11 4000 2000')) v(a,c,st,p,ph)
 LIMIT 2;
 
+-- ── Gifting (N-01, D37/L-06) ──────────────────────────────────────────────
+-- Idempotent on its own (ON CONFLICT / WHERE NOT EXISTS) -- unlike the rest
+-- of this script, which only runs once against an empty catalogue, this
+-- block is safe to re-run against a catalogue that already has it.
+INSERT INTO categories (name, slug, display_order)
+VALUES ('Gifting', 'gifting', 8)
+ON CONFLICT (slug) DO NOTHING;
+
+INSERT INTO subcategories (category_id, name, slug, size_label, size_unit)
+SELECT c.id, v.s, v.sl, v.lbl, v.unit FROM categories c
+JOIN (VALUES
+  ('gifting', 'Coins', 'coins', 'Weight', 'g'),
+  ('gifting', 'Idols', 'idols', 'Height', 'inches'),
+  ('gifting', 'Idol Frames', 'idol-frames', 'Size', 'inches'),
+  ('gifting', 'Bartan & Utensils', 'bartan-utensils', 'Capacity', 'ml'),
+  ('gifting', 'Watches', 'watches', 'Dial size', 'mm')
+) v(cs, s, sl, lbl, unit) ON v.cs = c.slug
+WHERE NOT EXISTS (SELECT 1 FROM subcategories existing WHERE existing.slug = v.sl);
+
+-- 24K Gold and 999 Silver for coins/bartan (both purities already seeded
+-- above with numeric_purity 99.9); same naming as the admin generator
+-- (single-colour base metals read "<purity> <base metal>", no colour).
+INSERT INTO metals (base_metal_id, metal_color_id, metal_purity_id, display_name)
+SELECT bm.id, mc.id, mp.id,
+       CASE WHEN bm.name = 'Silver' THEN mp.purity_label || ' ' || bm.name
+            ELSE mp.purity_label || ' ' || mc.name || ' ' || bm.name END
+FROM (VALUES ('Gold', 'Yellow', '24K'), ('Silver', 'Silver', '999')) v(m, c, p)
+JOIN base_metals bm ON bm.name = v.m
+JOIN metal_colors mc ON mc.name = v.c AND mc.base_metal_id = bm.id
+JOIN metal_purities mp ON mp.purity_label = v.p AND mp.base_metal_id = bm.id
+ON CONFLICT ON CONSTRAINT uq_metals_combination DO NOTHING;
+
 COMMIT;

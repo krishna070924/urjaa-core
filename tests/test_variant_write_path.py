@@ -35,7 +35,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from urjaa_core.core.database import engine
-from urjaa_core.models import Metal, Product, ProductStone, Stone, Store, Subcategory
+from urjaa_core.models import Metal, MetalColor, MetalPurity, Product, ProductStone, Stone, Store, Subcategory
 from urjaa_core.schemas.admin.management import (
     ProductStonesUpdateRequest,
     StoneAssignmentItem,
@@ -61,11 +61,19 @@ def main() -> None:
         assert gold_22k and gold_14k_white and sized_subcategory and ruby, (
             "run scripts/seed_dev_catalogue.sql first"
         )
-        # 24K Yellow Gold: base_metal_id=1/metal_color_id=1/metal_purity_id=1
-        # are each valid rows, but scripts/seed_dev_catalogue.sql never
-        # generates that combination -- exactly the "no such metals row yet"
-        # case (2b) needs.
-        assert gold_22k.base_metal_id == 1 and gold_22k.metal_color_id == 1
+        # Case (2b) below needs a (colour, purity) pair under Gold with no
+        # `metals` row -- found dynamically rather than hardcoded, so a later
+        # seed addition (e.g. N-01's 24K Yellow Gold) can't silently turn a
+        # hardcoded "known missing" triad into a false assertion.
+        gold_colour_ids = [c.id for c in db.query(MetalColor).filter(MetalColor.base_metal_id == gold_22k.base_metal_id)]
+        gold_purity_ids = [p.id for p in db.query(MetalPurity).filter(MetalPurity.base_metal_id == gold_22k.base_metal_id)]
+        existing_gold_combos = {
+            (m.metal_color_id, m.metal_purity_id)
+            for m in db.query(Metal).filter(Metal.base_metal_id == gold_22k.base_metal_id)
+        }
+        missing_combo = next(
+            (c, p) for c in gold_colour_ids for p in gold_purity_ids if (c, p) not in existing_gold_combos
+        )
 
         product = Product(
             store_id=store.id, name="H10 check", slug=f"h10-{uuid.uuid4().hex[:8]}",
@@ -98,7 +106,9 @@ def main() -> None:
         # for that exact combination -> metal_id stays null.
         v2b = svc.create_variant(
             db, store.id, product.id,
-            VariantCreateRequest(base_metal_id=1, metal_color_id=1, metal_purity_id=1),
+            VariantCreateRequest(
+                base_metal_id=gold_22k.base_metal_id, metal_color_id=missing_combo[0], metal_purity_id=missing_combo[1]
+            ),
         )
         assert v2b.metal_id is None, v2b.metal_id
         print("create(legacy triad, no combo)     -> metal_id null     OK")
