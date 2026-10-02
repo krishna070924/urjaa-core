@@ -1658,12 +1658,24 @@ class AdminManagementService:
         page: int = 1,
         limit: int = 20,
         search: str | None = None,
+        category_id: int | None = None,
+        subcategory_id: int | None = None,
+        collection_id: int | None = None,
     ) -> tuple[list[Product], int]:
         if page < 1:
             raise HTTPException(status_code=400, detail="page must be >= 1")
         if limit < 1 or limit > 100:
             raise HTTPException(status_code=400, detail="limit must be between 1 and 100")
-        return AdminManagementRepository.get_products_page(db, page, limit, store_id=store_id, search=search or None)
+        return AdminManagementRepository.get_products_page(
+            db,
+            page,
+            limit,
+            store_id=store_id,
+            search=search or None,
+            category_id=category_id,
+            subcategory_id=subcategory_id,
+            collection_id=collection_id,
+        )
 
     @staticmethod
     def get_product_detail(db: Session, store_id: UUID, product_id: UUID) -> Product:
