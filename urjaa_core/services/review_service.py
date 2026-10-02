@@ -103,18 +103,20 @@ class ReviewService:
         page: int = 1,
         limit: int = 10,
         sort: str = "latest",
+        rating: int | None = None,
     ) -> ProductReviewsResponse:
         normalized_sort = ReviewService._normalize_sort(sort)
         product = ReviewService._get_product_or_404(db, product_id)
 
-        query = (
+        base_query = (
             db.query(ProductReview, User.full_name)
             .outerjoin(User, User.id == ProductReview.user_id)
             .filter(ProductReview.product_id == product.id, ProductReview.is_approved.is_(True))
         )
 
-        total_count = query.count()
-        pages = max(1, ceil(total_count / limit)) if total_count > 0 else 1
+        # Unfiltered stats -- a `rating` filter narrows the list below, never
+        # the product's overall average/count/breakdown.
+        total_count = base_query.count()
 
         aggregate = (
             db.query(func.avg(ProductReview.rating), func.count(ProductReview.id))
@@ -123,6 +125,12 @@ class ReviewService:
         )
         average_value = float(aggregate[0]) if aggregate and aggregate[0] is not None else 0.0
         average_rating = round(average_value, 1)
+        rating_breakdown = ReviewService._get_rating_breakdown(db, product.id)
+
+        query = base_query if rating is None else base_query.filter(ProductReview.rating == rating)
+
+        filtered_count = query.count()
+        pages = max(1, ceil(filtered_count / limit)) if filtered_count > 0 else 1
 
         if normalized_sort == "highest":
             query = query.order_by(ProductReview.rating.desc(), ProductReview.created_at.desc())
@@ -144,7 +152,9 @@ class ReviewService:
         return ProductReviewsResponse(
             average_rating=average_rating,
             total_count=total_count,
-            rating_breakdown=ReviewService._get_rating_breakdown(db, product.id),
+            rating_breakdown=rating_breakdown,
+            rating_filter=rating,
+            filtered_count=filtered_count,
             items=items,
             page=page,
             limit=limit,
