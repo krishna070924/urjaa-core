@@ -393,13 +393,13 @@ ADMIN_ROUTE_PERMISSION_RULES: list[dict[str, Any]] = [
     {
         "pattern": re.compile(r"^/admin/upload-image$"),
         "methods": {"POST"},
-        "any_of": {ADMIN_PERMISSION_MANAGE_CMS, ADMIN_PERMISSION_MANAGE_PRODUCTS},
+        "any_of": {ADMIN_PERMISSION_MANAGE_CMS, ADMIN_PERMISSION_MANAGE_PRODUCTS, ADMIN_PERMISSION_MANAGE_WEBSITE},
     },
     {
         # N-03: hero video upload, same permission bucket as upload-image.
         "pattern": re.compile(r"^/admin/upload-video$"),
         "methods": {"POST"},
-        "any_of": {ADMIN_PERMISSION_MANAGE_CMS, ADMIN_PERMISSION_MANAGE_PRODUCTS},
+        "any_of": {ADMIN_PERMISSION_MANAGE_CMS, ADMIN_PERMISSION_MANAGE_PRODUCTS, ADMIN_PERMISSION_MANAGE_WEBSITE},
     },
     {
         # N-03: Home/Our Story CMS content — ticket calls for the

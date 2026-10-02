@@ -124,8 +124,9 @@ class CuratedCollectionsContent(BaseModel):
     @field_validator("tiles")
     @classmethod
     def _exactly_four(cls, value: list[CuratedCollectionsTile]) -> list[CuratedCollectionsTile]:
-        if len(value) != 4:
-            raise ValueError("curated_collections needs exactly 4 tiles")
+        # 0 = keep the designed tiles; otherwise the component's fixed 4.
+        if len(value) not in (0, 4):
+            raise ValueError("curated_collections needs either no tiles or exactly 4")
         ids = [tile.collection_id for tile in value]
         if len(ids) != len(set(ids)):
             raise ValueError("Duplicate collection ids are not allowed")
@@ -174,8 +175,9 @@ class StoneStoriesContent(BaseModel):
     @field_validator("tiles")
     @classmethod
     def _exactly_four(cls, value: list[StoneStoryTile]) -> list[StoneStoryTile]:
-        if len(value) != 4:
-            raise ValueError("stone_stories needs exactly 4 tiles")
+        # 0 = keep the designed tiles; otherwise the component's fixed 4.
+        if len(value) not in (0, 4):
+            raise ValueError("stone_stories needs either no tiles or exactly 4")
         ids = [tile.stone_id for tile in value]
         if len(ids) != len(set(ids)):
             raise ValueError("Duplicate stone ids are not allowed")
@@ -211,15 +213,16 @@ class HomePageContent(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    hero: HeroContent
+    # None = keep the designed hero media.
+    hero: HeroContent | None = None
     shop_by_category: Annotated[list[ShopByCategoryTile], Field(max_length=8)] = Field(default_factory=list)
     deck: DeckContent = Field(default_factory=DeckContent)
     exclusive_offers: ExclusiveOffersContent = Field(default_factory=ExclusiveOffersContent)
     best_sellers: BestSellersContent = Field(default_factory=BestSellersContent)
-    curated_collections: CuratedCollectionsContent
+    curated_collections: CuratedCollectionsContent = Field(default_factory=CuratedCollectionsContent)
     for_her_him: ForHerHimContent = Field(default_factory=ForHerHimContent)
     shop_by_occasion: ShopByOccasionContent = Field(default_factory=ShopByOccasionContent)
-    stone_stories: StoneStoriesContent
+    stone_stories: StoneStoriesContent = Field(default_factory=StoneStoriesContent)
     curated_by_urjaa: CuratedByUrjaaContent = Field(default_factory=CuratedByUrjaaContent)
     craftsmanship: CraftsmanshipContent = Field(default_factory=CraftsmanshipContent)
 
