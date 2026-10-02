@@ -302,6 +302,12 @@ def resolve_home_for_storefront(db: Session) -> dict[str, Any]:
     products_by_id = _resolve_products(db, product_ids)
     categories_by_id = _resolve_categories(db, category_ids)
     collections_by_id = _resolve_collections(db, collection_ids)
+    stone_ids = [tile.stone_id for tile in content.stone_stories.tiles]
+    stone_names = (
+        {row.id: row.name for row in db.query(Stone.id, Stone.name).filter(Stone.id.in_(stone_ids))}
+        if stone_ids
+        else {}
+    )
 
     return {
         "hero": content.hero.model_dump(mode="json") if content.hero else None,
@@ -328,8 +334,12 @@ def resolve_home_for_storefront(db: Session) -> dict[str, Any]:
         },
         "for_her_him": content.for_her_him.model_dump(mode="json"),
         "shop_by_occasion": content.shop_by_occasion.model_dump(mode="json"),
+        # Name included so the storefront links by name, never by a db id.
         "stone_stories": {
-            "tiles": [tile.model_dump(mode="json") for tile in content.stone_stories.tiles]
+            "tiles": [
+                {**tile.model_dump(mode="json"), "name": stone_names.get(tile.stone_id)}
+                for tile in content.stone_stories.tiles
+            ]
         },
         "curated_by_urjaa": {
             "products": [
