@@ -72,6 +72,8 @@ def test_valid_save_round_trips(db: Session, store_id) -> None:
     current, versions = cms_service.get_page(db, "home")
     assert current == content
     assert versions == []
+    resolved = cms_service.resolve_home_for_storefront(db)
+    assert all(tile.get("name") for tile in resolved["stone_stories"]["tiles"]), resolved["stone_stories"]
     print("valid save round-trips                          OK")
 
 
