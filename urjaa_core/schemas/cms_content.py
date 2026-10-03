@@ -484,6 +484,7 @@ FAQ_LINKS = (
     "/policies/privacy",
     "/size-guide",
     "/book-appointment",
+    "/bespoke",
     "/contact",
     "/our-story",
 )
@@ -496,22 +497,7 @@ class FaqItem(BaseModel):
     question: str = Field(min_length=1, max_length=200)
     answer: str = Field(min_length=1, max_length=2000)
     most_asked: bool = False
-    related_link: (
-        Literal[
-            "/policies/shipping",
-            "/policies/refunds",
-            "/policies/buy-backs",
-            "/policies/exchanges",
-            "/policies/cancellation",
-            "/policies/terms",
-            "/policies/privacy",
-            "/size-guide",
-            "/book-appointment",
-            "/contact",
-            "/our-story",
-        ]
-        | None
-    ) = None
+    related_link: Literal[FAQ_LINKS] | None = None  # Literal[tuple] == Literal[*tuple]
     related_link_label: str | None = Field(default=None, max_length=40)
 
 
