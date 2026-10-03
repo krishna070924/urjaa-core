@@ -26,6 +26,7 @@ from urjaa_core.models.category import Category
 from urjaa_core.models.collection import Collection
 from urjaa_core.models.product import Product
 from urjaa_core.models.stone import Stone
+from urjaa_core.models.subcategory import Subcategory
 from urjaa_core.models.tag import Tag
 from urjaa_core.models.website_config import WebsiteConfig
 from urjaa_core.repositories.product_repository import ProductRepository
@@ -57,7 +58,7 @@ _EMPTY_HOME_RESOLVED: dict[str, Any] = {
     "hero_slides": [],
     "shop_by_category": [],
     "deck": {"products": []},
-    "exclusive_offers": {"slots": [{"image_url": None}, {"image_url": None}, {"image_url": None}]},
+    "exclusive_offers": {"slots": [{"image_url": None, "link": None}] * 3},
     "best_sellers": {"products": []},
     "curated_collections": {"tiles": []},
     "for_her_him": {"her_image_url": None, "him_image_url": None},
@@ -385,6 +386,49 @@ def _resolve_hero_link(link, categories_by_id, collections_by_id) -> dict[str, A
     return {"kind": link.kind, "name": entity["name"], "href": _hero_link_href(link.kind, entity["slug"])}
 
 
+def _resolve_offer_slots(db: Session, slots: list, categories_by_id, collections_by_id) -> list[dict[str, Any]]:
+    """P-04: each offer banner -> {image_url, link: {kind, name, href} | None}.
+    A link whose target was deleted/deactivated resolves to None (banner
+    still shows, just isn't clickable)."""
+    links = [slot.link for slot in slots if slot.link]
+    product_ids = [l.product_id for l in links if l.kind == "product"]
+    sub_ids = [l.id for l in links if l.kind == "subcategory"]
+    products = (
+        {
+            row.id: (row.name, f"/product/{row.slug}")
+            for row in db.query(Product.id, Product.name, Product.slug).filter(
+                Product.id.in_(product_ids), Product.status == "active", Product.deleted_at.is_(None)
+            )
+        }
+        if product_ids
+        else {}
+    )
+    subs = (
+        {
+            row.id: (row.name, f"/collections?category={row.category_slug}&subcategory={row.slug}")
+            for row in db.query(Subcategory.id, Subcategory.name, Subcategory.slug, Category.slug.label("category_slug"))
+            .join(Category, Category.id == Subcategory.category_id)
+            .filter(Subcategory.id.in_(sub_ids), Category.is_deleted.is_(False))
+        }
+        if sub_ids
+        else {}
+    )
+
+    def resolve(link):
+        if link is None:
+            return None
+        if link.kind == "product":
+            hit = products.get(link.product_id)
+        elif link.kind == "subcategory":
+            hit = subs.get(link.id)
+        else:
+            entity = (categories_by_id if link.kind == "category" else collections_by_id).get(link.id)
+            hit = (entity["name"], _hero_link_href(link.kind, entity["slug"])) if entity else None
+        return {"kind": link.kind, "name": hit[0], "href": hit[1]} if hit else None
+
+    return [{"image_url": slot.image_url, "link": resolve(slot.link)} for slot in slots]
+
+
 def _resolve_hero_slides(
     db: Session,
     slides: list,
@@ -430,10 +474,13 @@ def resolve_home_for_storefront(db: Session) -> dict[str, Any]:
     )
     category_ids = [tile.category_id for tile in content.shop_by_category]
     category_ids += [link.id for slide in content.hero_slides for link in slide.links() if link.kind == "category"]
+    offer_links = [slot.link for slot in content.exclusive_offers.slots if slot.link]
+    category_ids += [link.id for link in offer_links if link.kind == "category"]
     collection_ids = [tile.collection_id for tile in content.curated_collections.tiles]
     collection_ids += [
         link.id for slide in content.hero_slides for link in slide.links() if link.kind == "collection"
     ]
+    collection_ids += [link.id for link in offer_links if link.kind == "collection"]
 
     products_by_id = _resolve_products(db, product_ids)
     categories_by_id = _resolve_categories(db, category_ids)
@@ -457,7 +504,7 @@ def resolve_home_for_storefront(db: Session) -> dict[str, Any]:
             "products": [products_by_id[pid] for pid in content.deck.product_ids if pid in products_by_id]
         },
         "exclusive_offers": {
-            "slots": [slot.model_dump(mode="json") for slot in content.exclusive_offers.slots]
+            "slots": _resolve_offer_slots(db, content.exclusive_offers.slots, categories_by_id, collections_by_id)
         },
         "best_sellers": {"products": best_sellers},
         "curated_collections": {

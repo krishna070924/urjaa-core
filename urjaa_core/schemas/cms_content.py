@@ -154,16 +154,40 @@ class ImageSlot(BaseModel):
     image_url: MediaUrl = None
 
 
+class OfferLink(BaseModel):
+    """Where an offer banner opens: one product, or a collection / category /
+    subcategory listing. Products are UUIDs; the rest are integer ids."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["product", "collection", "category", "subcategory"]
+    id: int | None = None
+    product_id: UUID | None = None
+
+    @model_validator(mode="after")
+    def _target_matches_kind(self):
+        if self.kind == "product":
+            if self.product_id is None or self.id is not None:
+                raise ValueError("Choose which product this opens")
+        elif self.id is None or self.product_id is not None:
+            raise ValueError(f"Choose which {self.kind} this opens")
+        return self
+
+
+class OfferSlot(ImageSlot):
+    link: OfferLink | None = None
+
+
 class ExclusiveOffersContent(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    # 3 fixed photo slots — no text (D38). The component's copy for each
-    # slot is static/code-owned until a future text-enabled release.
-    slots: list[ImageSlot] = Field(default_factory=lambda: [ImageSlot(), ImageSlot(), ImageSlot()])
+    # 3 fixed banner slots: image + optional link, no text (P-04 — the
+    # banner image carries its own artwork).
+    slots: list[OfferSlot] = Field(default_factory=lambda: [OfferSlot(), OfferSlot(), OfferSlot()])
 
     @field_validator("slots")
     @classmethod
-    def _exactly_three(cls, value: list[ImageSlot]) -> list[ImageSlot]:
+    def _exactly_three(cls, value: list[OfferSlot]) -> list[OfferSlot]:
         if len(value) != 3:
             raise ValueError("exclusive_offers needs exactly 3 slots")
         return value
