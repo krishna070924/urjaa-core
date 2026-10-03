@@ -533,7 +533,8 @@ class FaqContent(BaseModel):
 
 # =============================================================================
 # Contact details (P-08): customer-care phone, email, WhatsApp and hours,
-# shown on Contact, the header's contact panel and the footer. None = the
+# shown on Contact, the header's contact panel and the footer, plus the
+# footer's own text. None = the
 # designed value; showrooms come from store_locations, not here.
 # =============================================================================
 
@@ -548,3 +549,7 @@ class ContactContent(BaseModel):
     # International format, digits only (wa.me link), e.g. 919820144092.
     whatsapp: str | None = Field(default=None, pattern=r"^[1-9][0-9]{7,14}$")
     hours: str | None = Field(default=None, max_length=120)
+    # Footer text (review 6). None = designed text, "" = hidden.
+    footer_tagline: str | None = Field(default=None, max_length=300)
+    newsletter_text: str | None = Field(default=None, max_length=200)
+    copyright: str | None = Field(default=None, max_length=120)
