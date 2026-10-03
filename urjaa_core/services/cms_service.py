@@ -29,7 +29,7 @@ from urjaa_core.models.stone import Stone
 from urjaa_core.models.tag import Tag
 from urjaa_core.models.website_config import WebsiteConfig
 from urjaa_core.repositories.product_repository import ProductRepository
-from urjaa_core.schemas.cms_content import HERO_PAGES, POLICY_KEYS, FaqContent, HomePageContent, OurStoryContent, PoliciesContent
+from urjaa_core.schemas.cms_content import HERO_PAGES, POLICY_KEYS, ContactContent, FaqContent, HomePageContent, OurStoryContent, PoliciesContent
 from urjaa_core.schemas.product import ProductResponse
 from urjaa_core.services.pricing_service import PricingService
 from urjaa_core.utils.currency import format_price_or_request
@@ -44,6 +44,7 @@ PAGE_MODELS: dict[str, type[BaseModel]] = {
     "our-story": OurStoryContent,
     "policies": PoliciesContent,
     "faq": FaqContent,
+    "contact": ContactContent,
 }
 
 PAGE_STORAGE_KEYS: dict[str, str] = {
@@ -51,6 +52,7 @@ PAGE_STORAGE_KEYS: dict[str, str] = {
     "our-story": "cms.our_story",
     "policies": "cms.policies",
     "faq": "cms.faq",
+    "contact": "cms.contact",
 }
 
 _EMPTY_HOME_RESOLVED: dict[str, Any] = {
@@ -493,7 +495,7 @@ def resolve_our_story_for_storefront(db: Session) -> dict[str, Any]:
 
 
 def resolve_plain_page_for_storefront(db: Session, page: str) -> dict[str, Any]:
-    """Policies / FAQ: stored content as-is; {} when nothing saved (the
+    """Policies / FAQ / contact: stored content as-is; {} when nothing saved (the
     storefront then shows its designed copy)."""
     current, _ = get_page(db, page)
     return current if isinstance(current, dict) else {}

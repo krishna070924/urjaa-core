@@ -28,7 +28,7 @@ def main() -> None:
     outer = conn.begin()
     db = Session(bind=conn, join_transaction_mode="create_savepoint")
     try:
-        db.execute(text("DELETE FROM website_configs WHERE key IN ('cms.policies', 'cms.faq')"))
+        db.execute(text("DELETE FROM website_configs WHERE key IN ('cms.policies', 'cms.faq', 'cms.contact')"))
         ship = {"title": "Shipping", "intro": "", "sections": [{"heading": "Dispatch", "paragraphs": ["We ship."], "bullets": ["Insured"]}]}
         saved, _ = cms_service.save_page(db, "policies", {"shipping": ship, "terms": None}, saved_by="t")
         assert saved["shipping"]["updated_at"] and saved["terms"] is None
@@ -53,6 +53,16 @@ def main() -> None:
         expect_422({"items": [dict(item, answer="")]}, "faq")
         assert cms_service.resolve_plain_page_for_storefront(db, "faq")["items"][0]["question"] == "How long?"
         print("faq: fixed categories, fixed links, round-trip        OK")
+
+        # P-08 contact details.
+        assert cms_service.resolve_plain_page_for_storefront(db, "contact") == {}
+        cms_service.save_page(db, "contact", {"phone": "+91 98201 44092", "email": "care@urjaa.in", "whatsapp": "919820144092"}, saved_by="t")
+        assert cms_service.resolve_plain_page_for_storefront(db, "contact")["whatsapp"] == "919820144092"
+        expect_422({"phone": "call me"}, "contact")
+        expect_422({"email": "not-an-email"}, "contact")
+        expect_422({"whatsapp": "+91 98201"}, "contact")
+        expect_422({"address": "x"}, "contact")
+        print("contact: phone/email/whatsapp validated, round-trip   OK")
     finally:
         db.close()
         outer.rollback()
