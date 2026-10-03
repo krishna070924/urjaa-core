@@ -119,13 +119,15 @@ class AdminManagementService:
         return row.id
 
     @staticmethod
-    def get_products_global(db: Session, page: int = 1, limit: int = 200, search: str | None = None) -> tuple[list[dict], int]:
+    def get_products_global(
+        db: Session, page: int = 1, limit: int = 200, search: str | None = None, tag_id: int | None = None
+    ) -> tuple[list[dict], int]:
         if page < 1:
             raise HTTPException(status_code=400, detail="page must be >= 1")
         if limit < 1 or limit > 1000:
             raise HTTPException(status_code=400, detail="limit must be between 1 and 1000")
 
-        all_products = AdminManagementRepository.get_all_products_with_relations(db)
+        all_products = AdminManagementRepository.get_all_products_with_relations(db, tag_id=tag_id)
 
         search_term = search.strip().lower() if search and search.strip() else None
 
