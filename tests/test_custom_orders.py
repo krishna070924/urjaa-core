@@ -110,6 +110,21 @@ def main() -> None:
             pass
         print("bad phone -> rejected                                 OK")
 
+        from urjaa_core.schemas.admin.custom_orders import CustomOrderUpdateRequest, KarigarUpdateRequest
+        for bad in ({"customer_name": None}, {"customer_phone": None}, {"reference_image_urls": None}):
+            try:
+                CustomOrderUpdateRequest(**bad)
+                raise AssertionError(f"explicit null accepted: {bad}")
+            except ValidationError:
+                pass
+        try:
+            KarigarUpdateRequest(name=None)
+            raise AssertionError("karigar null name accepted")
+        except ValidationError:
+            pass
+        assert CustomOrderUpdateRequest(design_notes=None).design_notes is None  # clearing notes is fine
+        print("explicit null on required field -> 422               OK")
+
         # 6. reopen rule: delivered/cancelled need reopen=true to move further.
         order = AdminCustomOrderService.set_status(
             db,

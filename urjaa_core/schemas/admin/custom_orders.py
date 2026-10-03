@@ -11,7 +11,7 @@ from datetime import date, datetime
 from typing import Annotated
 from uuid import UUID
 
-from pydantic import AfterValidator, BaseModel, Field
+from pydantic import AfterValidator, BaseModel, Field, model_validator
 
 from urjaa_core.schemas.cms_content import RequiredMediaUrl
 
@@ -48,6 +48,14 @@ class KarigarCreateRequest(BaseModel):
     is_active: bool = True
 
 
+def _reject_null(model: BaseModel, *names: str) -> None:
+    """A partial update may omit a field, but an explicit null on a column the
+    database requires would be a 500 — reject it as a 422 instead."""
+    for name in names:
+        if name in model.model_fields_set and getattr(model, name) is None:
+            raise ValueError(f"{name} cannot be empty")
+
+
 class KarigarUpdateRequest(BaseModel):
     """Partial update: a field left out (None) is unchanged -- same
     convention as DiscountUpdateRequest."""
@@ -56,6 +64,11 @@ class KarigarUpdateRequest(BaseModel):
     phone: IndianMobile | None = None
     speciality: str | None = Field(default=None, max_length=200)
     is_active: bool | None = None
+
+    @model_validator(mode="after")
+    def _no_null_required(self):
+        _reject_null(self, "name", "phone", "is_active")
+        return self
 
 
 class AdminKarigarResponse(BaseModel):
@@ -97,6 +110,11 @@ class CustomOrderUpdateRequest(BaseModel):
     design_notes: str | None = Field(default=None, max_length=4000)
     reference_image_urls: list[RequiredMediaUrl] | None = Field(default=None, max_length=10)
     expected_date: date | None = None
+
+    @model_validator(mode="after")
+    def _no_null_required(self):
+        _reject_null(self, "customer_name", "customer_phone", "reference_image_urls")
+        return self
 
 
 class CustomOrderStatusUpdateRequest(BaseModel):
