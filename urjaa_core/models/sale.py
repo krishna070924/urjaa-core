@@ -33,3 +33,9 @@ class Sale(Base):
     customer = relationship("User", back_populates="sales")
     store = relationship("Store")
     order = relationship("Order", back_populates="sale")
+
+
+# Review 7: what Insights count as sold. A website sale follows its order's
+# status (PROCESSING -> SHIPPED -> DELIVERED); counting only COMPLETED (the
+# in-store status) dropped every online order once staff moved it along.
+REVENUE_SALE_STATUSES = ("COMPLETED", "PROCESSING", "SHIPPED", "DELIVERED")
