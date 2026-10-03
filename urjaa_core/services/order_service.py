@@ -472,6 +472,26 @@ class OrderService:
         }
 
     @staticmethod
+    def assert_checkout_order_in_stock(db: Session, order: Order) -> None:
+        """Stock is checked when a checkout order is created but only taken
+        once it is paid; re-check right before opening a payment so a piece
+        sold in between can't be charged twice. (ponytail: a narrow race
+        remains between this check and payment capture; reserve-at-checkout
+        is the upgrade if volume ever makes it real.)"""
+        items = db.query(OrderItem).filter(OrderItem.order_id == order.id).all()
+        variants = {
+            v.id: v
+            for v in db.query(ProductVariant).filter(ProductVariant.id.in_([i.variant_id for i in items])).all()
+        }
+        for item in items:
+            variant = variants.get(item.variant_id)
+            if variant is None or int(variant.stock_quantity or 0) < item.quantity:
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"{item.product_name} is no longer available in that quantity. Please review your bag.",
+                )
+
+    @staticmethod
     def record_paid_checkout_order(db: Session, order: Order) -> None:
         """POST /checkout/orders creates an order with nothing taken. When it
         becomes paid (verify-payment or webhook; call once), do what

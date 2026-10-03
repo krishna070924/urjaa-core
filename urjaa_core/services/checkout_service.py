@@ -126,7 +126,11 @@ class CheckoutService:
             if available_stock < item.quantity:
                 raise HTTPException(
                     status_code=409,
-                    detail=f"Insufficient stock for variant {item.variant_id}",
+                    detail=(
+                        f"{product.name} is out of stock"
+                        if available_stock <= 0
+                        else f"Only {available_stock} of {product.name} left in stock"
+                    ),
                 )
 
             CheckoutService.logger.warning(
