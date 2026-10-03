@@ -323,9 +323,6 @@ def main() -> None:
         db.execute(text("SET ROLE urjaa_admin_svc"))
         store = db.query(Store).first()
         assert store is not None, "dev DB needs at least one store"
-        # Start from no saved CMS content; real content (e.g. staff edits on
-        # dev) is restored by the outer rollback.
-        db.execute(text("DELETE FROM website_configs WHERE key LIKE 'cms.%'"))
 
         test_valid_save_round_trips(db, store.id)
         test_partial_home_save(db, store.id)
