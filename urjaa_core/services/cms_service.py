@@ -29,7 +29,7 @@ from urjaa_core.models.stone import Stone
 from urjaa_core.models.tag import Tag
 from urjaa_core.models.website_config import WebsiteConfig
 from urjaa_core.repositories.product_repository import ProductRepository
-from urjaa_core.schemas.cms_content import HERO_PAGES, HomePageContent, OurStoryContent
+from urjaa_core.schemas.cms_content import HERO_PAGES, POLICY_KEYS, FaqContent, HomePageContent, OurStoryContent, PoliciesContent
 from urjaa_core.schemas.product import ProductResponse
 from urjaa_core.services.pricing_service import PricingService
 from urjaa_core.utils.currency import format_price_or_request
@@ -42,11 +42,15 @@ BESTSELLER_TAG_NAME = "Bestseller"
 PAGE_MODELS: dict[str, type[BaseModel]] = {
     "home": HomePageContent,
     "our-story": OurStoryContent,
+    "policies": PoliciesContent,
+    "faq": FaqContent,
 }
 
 PAGE_STORAGE_KEYS: dict[str, str] = {
     "home": "cms.home",
     "our-story": "cms.our_story",
+    "policies": "cms.policies",
+    "faq": "cms.faq",
 }
 
 _EMPTY_HOME_RESOLVED: dict[str, Any] = {
@@ -210,6 +214,22 @@ def _push_current_into_versions(value: dict[str, Any], versions: list) -> list:
     return versions[:MAX_VERSIONS]
 
 
+def _stamp_policy_dates(content: dict[str, Any], previous: dict[str, Any] | None) -> None:
+    """'Last updated' per policy page = when its content last changed."""
+    previous = previous or {}
+    today = datetime.now(timezone.utc).date().isoformat()
+    for key in POLICY_KEYS:
+        page = content.get(key)
+        if not isinstance(page, dict):
+            continue
+        before = previous.get(key) if isinstance(previous.get(key), dict) else None
+        strip = lambda d: {k: v for k, v in d.items() if k != "updated_at"}  # noqa: E731
+        if before is not None and strip(before) == strip(page):
+            page["updated_at"] = before.get("updated_at") or today
+        else:
+            page["updated_at"] = today
+
+
 def save_page(db: Session, page: str, raw_content: dict[str, Any], saved_by: str) -> tuple[dict[str, Any], list[str]]:
     _require_page(page)
     model_cls = PAGE_MODELS[page]
@@ -230,6 +250,8 @@ def save_page(db: Session, page: str, raw_content: dict[str, Any], saved_by: str
     versions = _push_current_into_versions(value, list(value.get("versions") or []))
 
     content_dict = content_model.model_dump(mode="json")
+    if page == "policies":
+        _stamp_policy_dates(content_dict, value.get("current"))
     row.value = {
         "current": content_dict,
         "current_saved_at": _now_iso(),
@@ -271,6 +293,8 @@ def restore_version(db: Session, page: str, index: int, saved_by: str) -> tuple[
     remaining = _push_current_into_versions(row.value, remaining)
 
     content_dict = content_model.model_dump(mode="json")
+    if page == "policies":
+        _stamp_policy_dates(content_dict, row.value.get("current"))
     row.value = {
         "current": content_dict,
         "current_saved_at": _now_iso(),
@@ -465,4 +489,11 @@ def resolve_home_for_storefront(db: Session) -> dict[str, Any]:
 
 def resolve_our_story_for_storefront(db: Session) -> dict[str, Any]:
     current, _ = get_page(db, "our-story")
+    return current if isinstance(current, dict) else {}
+
+
+def resolve_plain_page_for_storefront(db: Session, page: str) -> dict[str, Any]:
+    """Policies / FAQ: stored content as-is; {} when nothing saved (the
+    storefront then shows its designed copy)."""
+    current, _ = get_page(db, page)
     return current if isinstance(current, dict) else {}
