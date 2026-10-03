@@ -529,3 +529,22 @@ class FaqContent(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     items: list[FaqItem] = Field(default_factory=list, max_length=150)
+
+
+# =============================================================================
+# Contact details (P-08): customer-care phone, email, WhatsApp and hours,
+# shown on Contact, the header's contact panel and the footer. None = the
+# designed value; showrooms come from store_locations, not here.
+# =============================================================================
+
+_PHONE = r"^\+?[0-9 ()\-]{6,24}$"
+
+
+class ContactContent(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    phone: str | None = Field(default=None, pattern=_PHONE)
+    email: str | None = Field(default=None, max_length=120, pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+    # International format, digits only (wa.me link), e.g. 919820144092.
+    whatsapp: str | None = Field(default=None, pattern=r"^[1-9][0-9]{7,14}$")
+    hours: str | None = Field(default=None, max_length=120)
