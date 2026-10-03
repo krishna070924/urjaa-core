@@ -277,6 +277,19 @@ ADMIN_ROUTE_PERMISSION_RULES: list[dict[str, Any]] = [
         "methods": WRITE_METHODS,
         "any_of": {ADMIN_PERMISSION_MANAGE_PRODUCTS},
     },
+    # O-04: Custom Orders + Karigars (D44) live under the sales permission
+    # bucket. Fail-closed table -- a route missing here 403s for every admin
+    # regardless of their permissions, so this is not optional.
+    {
+        "pattern": re.compile(r"^/admin/custom-orders(?:/.*)?$"),
+        "methods": WRITE_METHODS,
+        "any_of": {ADMIN_PERMISSION_MANAGE_SALES},
+    },
+    {
+        "pattern": re.compile(r"^/admin/karigars(?:/.*)?$"),
+        "methods": WRITE_METHODS,
+        "any_of": {ADMIN_PERMISSION_MANAGE_SALES},
+    },
     {
         "pattern": re.compile(r"^/admin/images(?:/.*)?$"),
         "methods": WRITE_METHODS,
@@ -336,6 +349,11 @@ ADMIN_ROUTE_PERMISSION_RULES: list[dict[str, Any]] = [
         "any_of": {ADMIN_PERMISSION_MANAGE_PRODUCTS, ADMIN_PERMISSION_MANAGE_INVENTORY},
     },
     {
+        "pattern": re.compile(r"^/admin/(custom-orders|karigars)(?:/.*)?$"),
+        "methods": {"GET"},
+        "any_of": {ADMIN_PERMISSION_MANAGE_SALES, ADMIN_PERMISSION_VIEW_SALES},
+    },
+    {
         "pattern": re.compile(r"^/admin/images(?:/.*)?$"),
         "methods": {"GET"},
         "any_of": {ADMIN_PERMISSION_MANAGE_PRODUCTS},
@@ -391,9 +409,16 @@ ADMIN_ROUTE_PERMISSION_RULES: list[dict[str, Any]] = [
     },
     # FIX: routes previously missing from ADMIN_ROUTE_PERMISSION_RULES (403'd for everyone, discovered 2026-09-18)
     {
+        # O-04: urjaa/custom-orders uploads go through this same route, so
+        # manage_sales needs to be in the bucket too.
         "pattern": re.compile(r"^/admin/upload-image$"),
         "methods": {"POST"},
-        "any_of": {ADMIN_PERMISSION_MANAGE_CMS, ADMIN_PERMISSION_MANAGE_PRODUCTS, ADMIN_PERMISSION_MANAGE_WEBSITE},
+        "any_of": {
+            ADMIN_PERMISSION_MANAGE_CMS,
+            ADMIN_PERMISSION_MANAGE_PRODUCTS,
+            ADMIN_PERMISSION_MANAGE_WEBSITE,
+            ADMIN_PERMISSION_MANAGE_SALES,
+        },
     },
     {
         # N-03: hero video upload, same permission bucket as upload-image.
