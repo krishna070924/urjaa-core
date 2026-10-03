@@ -62,6 +62,8 @@ def main() -> None:
         expect_422({"email": "not-an-email"}, "contact")
         expect_422({"whatsapp": "+91 98201"}, "contact")
         expect_422({"address": "x"}, "contact")
+        cms_service.save_page(db, "contact", {"footer_tagline": "", "copyright": "© Urjaa"}, saved_by="t")
+        assert cms_service.resolve_plain_page_for_storefront(db, "contact")["footer_tagline"] == ""
         print("contact: phone/email/whatsapp validated, round-trip   OK")
     finally:
         db.close()
