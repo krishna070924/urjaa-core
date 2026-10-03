@@ -4,7 +4,7 @@ from math import ceil
 from uuid import UUID
 
 from fastapi import HTTPException
-from sqlalchemy import or_
+from sqlalchemy import or_, update
 from sqlalchemy.orm import Session, joinedload, selectinload
 
 from urjaa_core.models.address import Address
@@ -472,6 +472,56 @@ class OrderService:
         }
 
     @staticmethod
+    def record_paid_checkout_order(db: Session, order: Order) -> None:
+        """POST /checkout/orders creates an order with nothing taken. When it
+        becomes paid (verify-payment or webhook; call once), do what
+        create_order_from_cart does at creation: take stock (reserve pieces /
+        decrement the count), record the website sales that Insights and
+        update_admin_order_status work from, and empty those lines from the bag.
+        """
+        items = db.query(OrderItem).filter(OrderItem.order_id == order.id).all()
+        variants = {
+            v.id: v
+            for v in db.query(ProductVariant).filter(ProductVariant.id.in_([i.variant_id for i in items])).all()
+        }
+        for item in items:
+            if physical_unit_service.is_tracked(db, item.variant_id):
+                physical_unit_service.take_units(db, item.variant_id, item.quantity, order_item=item)
+            else:
+                # Conditional decrement: never oversell / go negative.
+                db.execute(
+                    update(ProductVariant)
+                    .where(ProductVariant.id == item.variant_id, ProductVariant.stock_quantity >= item.quantity)
+                    .values(stock_quantity=ProductVariant.stock_quantity - item.quantity)
+                )
+            variant = variants.get(item.variant_id)
+            cost = round_money(Decimal(getattr(variant, "cost_price", None) or 0) * item.quantity)
+            db.add(
+                Sale(
+                    store_id=item.store_id,
+                    order_id=order.id,
+                    product_id=item.product_id,
+                    variant_id=item.variant_id,
+                    customer_id=order.user_id,
+                    quantity=item.quantity,
+                    total_amount=item.line_total,
+                    final_price=item.line_total,
+                    cost_price=cost,
+                    profit=item.line_total - cost,
+                    source="website",
+                    status="COMPLETED",
+                    date_time=order.created_at,
+                )
+            )
+        if order.user_id is not None:
+            cart_ids = db.query(Cart.id).filter(Cart.user_id == order.user_id)
+            db.query(CartItem).filter(
+                CartItem.cart_id.in_(cart_ids),
+                CartItem.variant_id.in_([i.variant_id for i in items]),
+            ).delete(synchronize_session=False)
+        db.flush()
+
+    @staticmethod
     def update_admin_order_status(
         db: Session,
         *,
@@ -520,7 +570,12 @@ class OrderService:
         # creation time (see create_order_from_cart) and can all transition to
         # CANCELLED per VALID_ORDER_STATUS_TRANSITIONS above. Without this, admin
         # cancellation permanently loses stock.
-        if normalized_status == "CANCELLED" and current_status in ("PENDING", "CONFIRMED", "PROCESSING"):
+        website_sales = db.query(Sale).filter(Sale.order_id == order.id, Sale.source == "website").all()
+
+        # Stock was taken iff a website sale exists: create_order_from_cart
+        # takes it at creation; checkout orders only once paid
+        # (record_paid_checkout_order). An unpaid checkout order took nothing.
+        if normalized_status == "CANCELLED" and current_status in ("PENDING", "CONFIRMED", "PROCESSING") and website_sales:
             variant_ids = [item.variant_id for item in order.items if item.variant_id is not None]
             # H9 FIX (locking): lock the variant rows before the read-modify-write,
             # matching create_order_from_cart's deduction locking above.
@@ -540,12 +595,8 @@ class OrderService:
         if normalized_status == "SHIPPED":
             physical_unit_service.mark_sold(db, [item.id for item in order.items])
 
-        linked_sale = (
-            db.query(Sale)
-            .filter(Sale.order_id == order.id, Sale.source == "website")
-            .first()
-        )
-        if linked_sale is not None:
+        # Checkout orders have one sale per line; keep them all in step.
+        for linked_sale in website_sales:
             linked_sale.status = OrderService._normalize_sale_status(normalized_status)
 
         # Schedule post-purchase triggers when order is delivered

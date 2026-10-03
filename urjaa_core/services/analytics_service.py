@@ -263,7 +263,7 @@ def compute_product_affinity(store_id: UUID, db: Any) -> dict[str, Any] | None:
         from sklearn.linear_model import LogisticRegression
         from sklearn.preprocessing import LabelEncoder
         from urjaa_core.models.product_view_event import ProductViewEvent
-        from urjaa_core.models.sale import Sale
+        from urjaa_core.models.sale import REVENUE_SALE_STATUSES, Sale
         from urjaa_core.models.product import Product
         from urjaa_core.models.product_variant import ProductVariant
         from sqlalchemy import func
@@ -298,7 +298,7 @@ def compute_product_affinity(store_id: UUID, db: Any) -> dict[str, Any] | None:
             )
             .join(Product, Product.id == Sale.product_id)
             .outerjoin(ProductVariant, ProductVariant.id == Sale.variant_id)
-            .filter(Sale.store_id == store_id, Sale.status == "COMPLETED")
+            .filter(Sale.store_id == store_id, Sale.status.in_(REVENUE_SALE_STATUSES))
             .limit(5000)
             .all()
         )
