@@ -56,20 +56,81 @@ def _no_duplicates(values: list) -> list:
 # Home page
 # =============================================================================
 
+# Fixed site pages a hero button may open (no free URLs: nothing to mistype
+# or to point off-site).
+HERO_PAGES = {
+    "all_jewellery": "/collections",
+    "new_arrivals": "/collections?sort=newest",
+    "best_sellers": "/collections?sort=best_selling",
+    "book_appointment": "/book-appointment",
+    "our_story": "/our-story",
+}
+
+
 class HeroSlideLink(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    kind: Literal["collection", "category"]
-    id: int
+    kind: Literal["collection", "category", "page"]
+    id: int | None = None
+    page: Literal["all_jewellery", "new_arrivals", "best_sellers", "book_appointment", "our_story"] | None = None
+
+    @model_validator(mode="after")
+    def _target_matches_kind(self):
+        if self.kind == "page":
+            if self.page is None:
+                raise ValueError("Choose which page this opens")
+        elif self.id is None:
+            raise ValueError(f"Choose which {self.kind} this opens")
+        return self
+
+
+def _text(limit: int):
+    # None = show the designed text; "" = hide this line.
+    return Field(default=None, max_length=limit)
+
+
+class HeroButton(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    label: str | None = _text(40)
+    link: HeroSlideLink | None = None
+
+
+class HeroSpotlight(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    eyebrow: str | None = _text(60)
+    text: str | None = _text(240)
+    footnote: str | None = _text(60)
 
 
 class HeroSlide(BaseModel):
+    """O-02/D41 slide. Text fields: None = the designed text, "" = hidden.
+    show_text False = media only, no overlay at all."""
+
     model_config = ConfigDict(extra="forbid")
 
     media_type: Literal["image", "video"]
     media_url: RequiredMediaUrl
     poster_url: MediaUrl = None
+    # Whole-slide click target (optional).
     link: HeroSlideLink | None = None
+    show_text: bool = True
+    eyebrow: str | None = _text(80)
+    location_line: str | None = _text(80)
+    headline: str | None = _text(80)
+    headline_accent: str | None = _text(80)
+    body: str | None = _text(400)
+    primary_button: HeroButton | None = None
+    secondary_button: HeroButton | None = None
+    spotlight: HeroSpotlight | None = None
+
+    def links(self) -> list["HeroSlideLink"]:
+        found = [self.link]
+        for button in (self.primary_button, self.secondary_button):
+            if button:
+                found.append(button.link)
+        return [link for link in found if link is not None]
 
 
 class ShopByCategoryTile(BaseModel):
@@ -254,8 +315,6 @@ class HomePageContent(BaseModel):
                 continue
             if slide.media_type == "video":
                 raise ValueError("Only the first hero slide may be a video")
-            if slide.link is None:
-                raise ValueError(f"Hero slide {i + 1} must have a link (only slide 1's link is optional)")
         return value
 
 
