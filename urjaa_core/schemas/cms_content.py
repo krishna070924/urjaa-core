@@ -423,3 +423,85 @@ class OurStoryContent(BaseModel):
     emblem: OurStoryEmblem = Field(default_factory=OurStoryEmblem)
     ancestral_roots: OurStoryAncestralRoots = Field(default_factory=OurStoryAncestralRoots)
     next_chapter: OurStoryNextChapter = Field(default_factory=OurStoryNextChapter)
+
+
+# =============================================================================
+# Policies + FAQ (O-05). Plain text only (owner decision); 9 fixed FAQ
+# categories. A page/list left unset (None / []) shows the designed copy.
+# =============================================================================
+
+POLICY_KEYS = ("shipping", "refunds", "buy_backs", "exchanges", "cancellation", "terms", "privacy")
+
+
+class PolicyTable(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    headers: list[Annotated[str, Field(max_length=80)]] = Field(default_factory=list, max_length=6)
+    rows: list[list[Annotated[str, Field(max_length=200)]]] = Field(default_factory=list, max_length=30)
+
+
+class PolicySection(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    heading: str = Field(default="", max_length=150)
+    paragraphs: list[Annotated[str, Field(max_length=3000)]] = Field(default_factory=list, max_length=20)
+    bullets: list[Annotated[str, Field(max_length=400)]] = Field(default_factory=list, max_length=40)
+    table: PolicyTable | None = None
+    footnote: str | None = Field(default=None, max_length=600)
+
+
+class PolicyPage(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    title: str = Field(min_length=1, max_length=120)
+    intro: str = Field(default="", max_length=1000)
+    sections: list[PolicySection] = Field(default_factory=list, max_length=30)
+    # Set by the server when this page's content changes; client value ignored.
+    updated_at: str | None = None
+
+
+class PoliciesContent(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    shipping: PolicyPage | None = None
+    refunds: PolicyPage | None = None
+    buy_backs: PolicyPage | None = None
+    exchanges: PolicyPage | None = None
+    cancellation: PolicyPage | None = None
+    terms: PolicyPage | None = None
+    privacy: PolicyPage | None = None
+
+
+FAQ_CATEGORIES = ("orders", "payments", "shipping", "returns", "jewellery", "sizing", "bespoke", "appointments", "care")
+# Pages an FAQ answer may point to (no free URLs).
+FAQ_LINKS = (
+    "/policies/shipping",
+    "/policies/refunds",
+    "/policies/buy-backs",
+    "/policies/exchanges",
+    "/policies/cancellation",
+    "/policies/terms",
+    "/policies/privacy",
+    "/size-guide",
+    "/book-appointment",
+    "/bespoke",
+    "/contact",
+    "/our-story",
+)
+
+
+class FaqItem(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    category: Literal["orders", "payments", "shipping", "returns", "jewellery", "sizing", "bespoke", "appointments", "care"]
+    question: str = Field(min_length=1, max_length=200)
+    answer: str = Field(min_length=1, max_length=2000)
+    most_asked: bool = False
+    related_link: Literal[FAQ_LINKS] | None = None  # Literal[tuple] == Literal[*tuple]
+    related_link_label: str | None = Field(default=None, max_length=40)
+
+
+class FaqContent(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    items: list[FaqItem] = Field(default_factory=list, max_length=150)
