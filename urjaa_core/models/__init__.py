@@ -60,3 +60,9 @@ from .post_purchase_trigger import PostPurchaseTrigger
 
 # Restock notifications
 from .product_restock_notification import ProductRestockNotification
+
+# Custom Orders + Karigars (O-04, D44)
+from .karigar import Karigar
+from .custom_order_status import CustomOrderStatus
+from .custom_order import CustomOrder
+from .custom_order_event import CustomOrderEvent
