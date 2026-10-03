@@ -42,6 +42,17 @@ def main() -> None:
         q("UPDATE orders SET status = 'PENDING' WHERE id = :o", o=order.id)
         db.expire_all()
 
+        # Sold out between order and payment -> 409 before opening payment.
+        from fastapi import HTTPException
+        q("UPDATE product_variants SET stock_quantity = 0 WHERE id = :v", v=item.variant_id)
+        try:
+            OrderService.assert_checkout_order_in_stock(db, order)
+            raise AssertionError("allowed payment for sold-out item")
+        except HTTPException as exc:
+            assert exc.status_code == 409
+        q("UPDATE product_variants SET stock_quantity = 3 WHERE id = :v", v=item.variant_id)
+        OrderService.assert_checkout_order_in_stock(db, order)
+
         # Paid (count-only): stock -1, one website sale, bag emptied.
         OrderService.record_paid_checkout_order(db, order)
         assert stock(item.variant_id) == 2
