@@ -301,6 +301,19 @@ class CraftsmanshipContent(BaseModel):
         return value
 
 
+class ConciergeContent(BaseModel):
+    """Review 7: the home page's "By Appointment" section text. None = the
+    designed text, "" = hidden. Showroom cards come from Stores."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    eyebrow: str | None = _text(60)
+    heading: str | None = _text(120)
+    body: str | None = _text(400)
+    form_heading: str | None = _text(80)
+    form_note: str | None = _text(80)
+
+
 class HomePageContent(BaseModel):
     """D38: media + product selection only, no text anywhere. Field order
     here is the page's section order (shop-by-budget/trust-strip/concierge
@@ -322,6 +335,7 @@ class HomePageContent(BaseModel):
     stone_stories: StoneStoriesContent = Field(default_factory=StoneStoriesContent)
     curated_by_urjaa: CuratedByUrjaaContent = Field(default_factory=CuratedByUrjaaContent)
     craftsmanship: CraftsmanshipContent = Field(default_factory=CraftsmanshipContent)
+    concierge: ConciergeContent = Field(default_factory=ConciergeContent)
 
     @field_validator("shop_by_category")
     @classmethod
@@ -533,8 +547,7 @@ class FaqContent(BaseModel):
 
 # =============================================================================
 # Contact details (P-08): customer-care phone, email, WhatsApp and hours,
-# shown on Contact, the header's contact panel and the footer, plus the
-# footer's own text. None = the
+# shown on Contact, the header's contact panel and the footer. None = the
 # designed value; showrooms come from store_locations, not here.
 # =============================================================================
 
@@ -549,7 +562,15 @@ class ContactContent(BaseModel):
     # International format, digits only (wa.me link), e.g. 919820144092.
     whatsapp: str | None = Field(default=None, pattern=r"^[1-9][0-9]{7,14}$")
     hours: str | None = Field(default=None, max_length=120)
-    # Footer text (review 6). None = designed text, "" = hidden.
-    footer_tagline: str | None = Field(default=None, max_length=300)
-    newsletter_text: str | None = Field(default=None, max_length=200)
-    copyright: str | None = Field(default=None, max_length=120)
+
+
+class FooterContent(BaseModel):
+    """Review 7: the site footer's own text. None = designed, "" = hidden.
+    Customer care comes from `contact`, showrooms from Stores."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    tagline: str | None = _text(300)
+    newsletter_heading: str | None = _text(60)
+    newsletter_text: str | None = _text(200)
+    copyright: str | None = _text(120)

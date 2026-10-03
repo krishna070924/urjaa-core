@@ -30,7 +30,7 @@ from urjaa_core.models.subcategory import Subcategory
 from urjaa_core.models.tag import Tag
 from urjaa_core.models.website_config import WebsiteConfig
 from urjaa_core.repositories.product_repository import ProductRepository
-from urjaa_core.schemas.cms_content import HERO_PAGES, POLICY_KEYS, ContactContent, FaqContent, HomePageContent, OurStoryContent, PoliciesContent
+from urjaa_core.schemas.cms_content import HERO_PAGES, POLICY_KEYS, ContactContent, FaqContent, FooterContent, HomePageContent, OurStoryContent, PoliciesContent
 from urjaa_core.schemas.product import ProductResponse
 from urjaa_core.services.pricing_service import PricingService
 from urjaa_core.utils.currency import format_price_or_request
@@ -46,6 +46,7 @@ PAGE_MODELS: dict[str, type[BaseModel]] = {
     "policies": PoliciesContent,
     "faq": FaqContent,
     "contact": ContactContent,
+    "footer": FooterContent,
 }
 
 PAGE_STORAGE_KEYS: dict[str, str] = {
@@ -54,6 +55,7 @@ PAGE_STORAGE_KEYS: dict[str, str] = {
     "policies": "cms.policies",
     "faq": "cms.faq",
     "contact": "cms.contact",
+    "footer": "cms.footer",
 }
 
 _EMPTY_HOME_RESOLVED: dict[str, Any] = {
@@ -68,6 +70,7 @@ _EMPTY_HOME_RESOLVED: dict[str, Any] = {
     "stone_stories": {"tiles": []},
     "curated_by_urjaa": {"products": []},
     "craftsmanship": {"slots": [{"image_url": None}, {"image_url": None}]},
+    "concierge": {},
 }
 
 
@@ -533,6 +536,7 @@ def resolve_home_for_storefront(db: Session) -> dict[str, Any]:
         "craftsmanship": {
             "slots": [slot.model_dump(mode="json") for slot in content.craftsmanship.slots]
         },
+        "concierge": content.concierge.model_dump(),
     }
 
 
@@ -542,7 +546,7 @@ def resolve_our_story_for_storefront(db: Session) -> dict[str, Any]:
 
 
 def resolve_plain_page_for_storefront(db: Session, page: str) -> dict[str, Any]:
-    """Policies / FAQ / contact: stored content as-is; {} when nothing saved (the
+    """Policies / FAQ / contact / footer: stored content as-is; {} when nothing saved (the
     storefront then shows its designed copy)."""
     current, _ = get_page(db, page)
     return current if isinstance(current, dict) else {}

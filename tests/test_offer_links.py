@@ -51,6 +51,10 @@ def main() -> None:
         home["exclusive_offers"]["slots"][2]["link"] = {"kind": "category", "id": 987654}
         cms_service.save_page(db, "home", home, saved_by="t")
         assert cms_service.resolve_home_for_storefront(db)["exclusive_offers"]["slots"][2]["link"] is None
+        home["concierge"] = {"heading": "Visit us", "body": ""}
+        cms_service.save_page(db, "home", home, saved_by="t")
+        c = cms_service.resolve_home_for_storefront(db)["concierge"]
+        assert c["heading"] == "Visit us" and c["body"] == "" and c["eyebrow"] is None, c
         print("offer links: validate, resolve, missing target  OK")
     finally:
         db.close()

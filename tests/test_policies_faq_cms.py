@@ -62,8 +62,10 @@ def main() -> None:
         expect_422({"email": "not-an-email"}, "contact")
         expect_422({"whatsapp": "+91 98201"}, "contact")
         expect_422({"address": "x"}, "contact")
-        cms_service.save_page(db, "contact", {"footer_tagline": "", "copyright": "© Urjaa"}, saved_by="t")
-        assert cms_service.resolve_plain_page_for_storefront(db, "contact")["footer_tagline"] == ""
+        expect_422({"footer_tagline": "x"}, "contact")
+        db.execute(text("DELETE FROM website_configs WHERE key = 'cms.footer'"))
+        cms_service.save_page(db, "footer", {"tagline": "", "copyright": "© Urjaa"}, saved_by="t")
+        assert cms_service.resolve_plain_page_for_storefront(db, "footer") == {"tagline": "", "newsletter_heading": None, "newsletter_text": None, "copyright": "© Urjaa"}
         print("contact: phone/email/whatsapp validated, round-trip   OK")
     finally:
         db.close()
