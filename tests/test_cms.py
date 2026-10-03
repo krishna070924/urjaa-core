@@ -221,14 +221,25 @@ def test_hero_slides_validation(db: Session) -> None:
     except HTTPException as exc:
         assert exc.status_code == 422, exc.detail
 
-    # Photo slide at position >= 2 without a link -> rejected.
+    # Button pointing at an unknown category -> 400.
     payload["hero_slides"] = [
-        {"media_type": "video", "media_url": f"{base}/a.mp4", "poster_url": None, "link": None},
-        {"media_type": "image", "media_url": f"{base}/b.jpg", "poster_url": None, "link": None},
+        {
+            "media_type": "image",
+            "media_url": f"{base}/b.jpg",
+            "primary_button": {"label": "Shop", "link": {"kind": "category", "id": 999999}},
+        },
     ]
     try:
         cms_service.save_page(db, "home", payload, saved_by="tester@urjaa.test")
-        raise AssertionError("photo slide 2 with no link should be rejected")
+        raise AssertionError("button to unknown category should be rejected")
+    except HTTPException as exc:
+        assert exc.status_code == 400, exc.detail
+
+    # Page link without a page -> 422.
+    payload["hero_slides"][0]["primary_button"] = {"label": "Shop", "link": {"kind": "page"}}
+    try:
+        cms_service.save_page(db, "home", payload, saved_by="tester@urjaa.test")
+        raise AssertionError("page link without page should be rejected")
     except HTTPException as exc:
         assert exc.status_code == 422, exc.detail
 
@@ -258,15 +269,33 @@ def test_hero_slides_validation(db: Session) -> None:
     content, warnings = cms_service.save_page(db, "home", payload, saved_by="tester@urjaa.test")
     assert warnings == [], warnings
     assert content["hero_slides"][0]["media_type"] == "video"
-    assert content["hero_slides"][1]["link"] == {"kind": "collection", "id": COLLECTION_IDS[0]}
+    saved_link = content["hero_slides"][1]["link"]
+    assert (saved_link["kind"], saved_link["id"]) == ("collection", COLLECTION_IDS[0]), saved_link
 
     resolved = cms_service.resolve_home_for_storefront(db)
     resolved_slides = resolved["hero_slides"]
     assert len(resolved_slides) == 2
     assert resolved_slides[0]["link"] is None
     link = resolved_slides[1]["link"]
-    assert link["kind"] == "collection" and link["href"] == f"/collections?collection={link['slug']}", link
-    print("hero_slides validation (video/link rules)        OK")
+    assert link["kind"] == "collection" and link["href"].startswith("/collections?collection="), link
+
+    # Per-slide text: None = designed, "" = hidden; buttons to pages; media only.
+    payload["hero_slides"][1].update(
+        {
+            "headline": "Bridal Edit",
+            "body": "",
+            "primary_button": {"label": "Book a visit", "link": {"kind": "page", "page": "book_appointment"}},
+            "spotlight": {"eyebrow": "", "text": "", "footnote": ""},
+        }
+    )
+    payload["hero_slides"][0]["show_text"] = False
+    cms_service.save_page(db, "home", payload, saved_by="tester@urjaa.test")
+    slides = cms_service.resolve_home_for_storefront(db)["hero_slides"]
+    assert slides[0]["show_text"] is False
+    assert slides[1]["headline"] == "Bridal Edit" and slides[1]["body"] == "" and slides[1]["eyebrow"] is None
+    assert slides[1]["primary_button"]["link"]["href"] == "/book-appointment", slides[1]["primary_button"]
+    assert slides[1]["spotlight"] == {"eyebrow": "", "text": "", "footnote": ""}
+    print("hero_slides validation + per-slide content     OK")
 
 
 def test_old_hero_object_normalized_on_read(db: Session) -> None:

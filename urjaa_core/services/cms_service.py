@@ -29,7 +29,7 @@ from urjaa_core.models.stone import Stone
 from urjaa_core.models.tag import Tag
 from urjaa_core.models.website_config import WebsiteConfig
 from urjaa_core.repositories.product_repository import ProductRepository
-from urjaa_core.schemas.cms_content import HomePageContent, OurStoryContent
+from urjaa_core.schemas.cms_content import HERO_PAGES, HomePageContent, OurStoryContent
 from urjaa_core.schemas.product import ProductResponse
 from urjaa_core.services.pricing_service import PricingService
 from urjaa_core.utils.currency import format_price_or_request
@@ -141,7 +141,7 @@ def _validate_references(db: Session, page: str, content: BaseModel) -> list[str
 
     category_ids = {tile.category_id for tile in content.shop_by_category}
     category_ids |= {
-        slide.link.id for slide in content.hero_slides if slide.link and slide.link.kind == "category"
+        link.id for slide in content.hero_slides for link in slide.links() if link.kind == "category"
     }
     if category_ids:
         found = {
@@ -156,7 +156,7 @@ def _validate_references(db: Session, page: str, content: BaseModel) -> list[str
 
     collection_ids = {tile.collection_id for tile in content.curated_collections.tiles}
     collection_ids |= {
-        slide.link.id for slide in content.hero_slides if slide.link and slide.link.kind == "collection"
+        link.id for slide in content.hero_slides for link in slide.links() if link.kind == "collection"
     }
     if collection_ids:
         found = {row.id for row in db.query(Collection.id).filter(Collection.id.in_(collection_ids))}
@@ -349,31 +349,48 @@ def _hero_link_href(kind: str, slug: str) -> str:
     return f"/collections?category={slug}" if kind == "category" else f"/collections?collection={slug}"
 
 
+def _resolve_hero_link(link, categories_by_id, collections_by_id) -> dict[str, Any] | None:
+    """Link -> {kind, name, href}; None when its target no longer exists."""
+    if link is None:
+        return None
+    if link.kind == "page":
+        return {"kind": "page", "name": None, "href": HERO_PAGES[link.page]}
+    entity = (categories_by_id if link.kind == "category" else collections_by_id).get(link.id)
+    if not entity:
+        return None
+    return {"kind": link.kind, "name": entity["name"], "href": _hero_link_href(link.kind, entity["slug"])}
+
+
 def _resolve_hero_slides(
     db: Session,
     slides: list,
     categories_by_id: dict[int, dict[str, Any]],
     collections_by_id: dict[int, dict[str, Any]],
 ) -> list[dict[str, Any]]:
+    def button(b):
+        if b is None:
+            return None
+        return {"label": b.label, "link": _resolve_hero_link(b.link, categories_by_id, collections_by_id)}
+
     resolved = []
     for slide in slides:
-        card = {"media_type": slide.media_type, "media_url": slide.media_url, "poster_url": slide.poster_url}
-        link = None
-        if slide.link:
-            entity = (
-                categories_by_id.get(slide.link.id)
-                if slide.link.kind == "category"
-                else collections_by_id.get(slide.link.id)
-            )
-            if entity:
-                link = {
-                    "kind": slide.link.kind,
-                    "slug": entity["slug"],
-                    "name": entity["name"],
-                    "href": _hero_link_href(slide.link.kind, entity["slug"]),
-                }
-        card["link"] = link
-        resolved.append(card)
+        resolved.append(
+            {
+                "media_type": slide.media_type,
+                "media_url": slide.media_url,
+                "poster_url": slide.poster_url,
+                "link": _resolve_hero_link(slide.link, categories_by_id, collections_by_id),
+                "show_text": slide.show_text,
+                "eyebrow": slide.eyebrow,
+                "location_line": slide.location_line,
+                "headline": slide.headline,
+                "headline_accent": slide.headline_accent,
+                "body": slide.body,
+                "primary_button": button(slide.primary_button),
+                "secondary_button": button(slide.secondary_button),
+                "spotlight": slide.spotlight.model_dump() if slide.spotlight else None,
+            }
+        )
     return resolved
 
 
@@ -388,10 +405,10 @@ def resolve_home_for_storefront(db: Session) -> dict[str, Any]:
         dict.fromkeys([*content.deck.product_ids, *content.curated_by_urjaa.product_ids])
     )
     category_ids = [tile.category_id for tile in content.shop_by_category]
-    category_ids += [slide.link.id for slide in content.hero_slides if slide.link and slide.link.kind == "category"]
+    category_ids += [link.id for slide in content.hero_slides for link in slide.links() if link.kind == "category"]
     collection_ids = [tile.collection_id for tile in content.curated_collections.tiles]
     collection_ids += [
-        slide.link.id for slide in content.hero_slides if slide.link and slide.link.kind == "collection"
+        link.id for slide in content.hero_slides for link in slide.links() if link.kind == "collection"
     ]
 
     products_by_id = _resolve_products(db, product_ids)
