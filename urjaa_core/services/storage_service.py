@@ -106,7 +106,8 @@ class CloudinaryStorageService(StorageService):
 # is the trust boundary that turns `folder` into a filesystem path — the
 # commission route in particular passes the client's raw Form value straight
 # through with no allow-list check of its own.
-LOCAL_STORAGE_ALLOWED_FOLDERS = {"urjaa/products", "urjaa/commission-requests", "urjaa/cms"}
+# O-04: urjaa/custom-orders holds reference images attached to a bespoke order.
+LOCAL_STORAGE_ALLOWED_FOLDERS = {"urjaa/products", "urjaa/commission-requests", "urjaa/cms", "urjaa/custom-orders"}
 
 # N-03: hero video uploads only ever go to the CMS folder — no client choice
 # of destination for videos (unlike images, which are reused across routes).
