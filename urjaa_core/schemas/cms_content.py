@@ -322,39 +322,88 @@ class HomePageContent(BaseModel):
 # Our Story page
 # =============================================================================
 
+def _story_text(limit: int):
+    # O-07: every line on Our Story is editable. None = the designed text,
+    # "" = hidden. Plain text only (paragraphs split on blank lines).
+    return Field(default=None, max_length=limit)
+
+
 class OurStorySection(BaseModel):
-    """Generic section shape (D38): heading, body text, optional photo.
-    `body` is plain text — paragraphs are whatever the author split on a
-    blank line; we only cap length, we don't store/accept markup."""
+    """Common shape: small label above the heading, heading, body, photo."""
 
     model_config = ConfigDict(extra="forbid")
 
-    heading: str = Field(min_length=1, max_length=150)
-    body: str = Field(min_length=1, max_length=4000)
+    eyebrow: str | None = _story_text(60)
+    heading: str | None = _story_text(150)
+    body: str | None = _story_text(4000)
     image_url: MediaUrl = None
 
-    @field_validator("heading", "body")
-    @classmethod
-    def _strip(cls, value: str) -> str:
-        value = value.strip()
-        if not value:
-            raise ValueError("Must not be blank")
-        return value
+
+class OurStoryOpening(OurStorySection):
+    scroll_hint: str | None = _story_text(40)
+
+
+class FounderItem(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str | None = _story_text(80)
+    role: str | None = _story_text(80)
+    image_url: MediaUrl = None
+
+
+class PillarItem(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    title: str | None = _story_text(60)
+    text: str | None = _story_text(400)
+
+
+class OurStoryJourney(OurStorySection):
+    founders: list[FounderItem] = Field(default_factory=list, max_length=4)
+    pillars_eyebrow: str | None = _story_text(60)
+    pillars_heading: str | None = _story_text(120)
+    pillars: list[PillarItem] = Field(default_factory=list, max_length=6)
+
+
+class StatItem(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    value: str | None = _story_text(20)
+    label: str | None = _story_text(40)
+
+
+class OurStoryWorkbench(OurStorySection):
+    stats: list[StatItem] = Field(default_factory=list, max_length=4)
+
+
+class OurStoryHands(OurStorySection):
+    image_caption: str | None = _story_text(120)
+    tags: list[Annotated[str, Field(max_length=60)]] = Field(default_factory=list, max_length=6)
 
 
 class BeliefItem(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    title: str = Field(min_length=1, max_length=120)
-    text: str = Field(min_length=1, max_length=600)
+    title: str | None = _story_text(120)
+    text: str | None = _story_text(600)
 
 
-class OurStoryBeliefsSection(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+class OurStoryBeliefsSection(OurStorySection):
+    beliefs: list[BeliefItem] = Field(default_factory=list, max_length=6)
 
-    heading: str = Field(min_length=1, max_length=150)
-    body: str = Field(min_length=1, max_length=4000)
-    beliefs: list[BeliefItem] = Field(min_length=1, max_length=6)
+
+class OurStoryEmblem(OurStorySection):
+    caption: str | None = _story_text(120)
+
+
+class OurStoryAncestralRoots(OurStorySection):
+    image_caption: str | None = _story_text(80)
+    button_label: str | None = _story_text(40)
+
+
+class OurStoryNextChapter(OurStorySection):
+    primary_button_label: str | None = _story_text(40)
+    secondary_button_label: str | None = _story_text(40)
 
 
 class OurStoryContent(BaseModel):
@@ -364,12 +413,13 @@ class OurStoryContent(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    opening: OurStorySection
-    introduction: OurStorySection
-    journey: OurStorySection
-    workbench: OurStorySection
-    hands: OurStorySection
-    beliefs: OurStoryBeliefsSection
-    emblem: OurStorySection
-    ancestral_roots: OurStorySection
-    next_chapter: OurStorySection
+    # Lists: [] = the designed items; a list replaces them wholesale.
+    opening: OurStoryOpening = Field(default_factory=OurStoryOpening)
+    introduction: OurStorySection = Field(default_factory=OurStorySection)
+    journey: OurStoryJourney = Field(default_factory=OurStoryJourney)
+    workbench: OurStoryWorkbench = Field(default_factory=OurStoryWorkbench)
+    hands: OurStoryHands = Field(default_factory=OurStoryHands)
+    beliefs: OurStoryBeliefsSection = Field(default_factory=OurStoryBeliefsSection)
+    emblem: OurStoryEmblem = Field(default_factory=OurStoryEmblem)
+    ancestral_roots: OurStoryAncestralRoots = Field(default_factory=OurStoryAncestralRoots)
+    next_chapter: OurStoryNextChapter = Field(default_factory=OurStoryNextChapter)
