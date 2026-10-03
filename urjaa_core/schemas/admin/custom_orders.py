@@ -7,11 +7,11 @@ same MEDIA_BASE_URL choke point as CMS content (urjaa_core/schemas/cms_content.p
 -- the one place that keeps uploaded-media fields pinned to our own host.
 """
 import re
-from datetime import date, datetime
+from datetime import date, datetime, timedelta, timezone
 from typing import Annotated
 from uuid import UUID
 
-from pydantic import AfterValidator, BaseModel, Field, model_validator
+from pydantic import AfterValidator, BaseModel, Field, field_validator, model_validator
 
 from urjaa_core.schemas.cms_content import RequiredMediaUrl
 
@@ -96,6 +96,17 @@ class AdminKarigarListResponse(BaseModel):
 class CustomOrderCreateRequest(BaseModel):
     customer_name: TrimmedName
     customer_phone: IndianMobile
+    taken_at: datetime | None = None
+
+    @field_validator("taken_at")
+    @classmethod
+    def _not_in_future(cls, value: datetime | None) -> datetime | None:
+        if value is not None:
+            now = datetime.now(timezone.utc)
+            aware = value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+            if aware > now + timedelta(minutes=5):
+                raise ValueError("The order date can't be in the future")
+        return value
     design_notes: str | None = Field(default=None, max_length=4000)
     reference_image_urls: list[RequiredMediaUrl] = Field(default_factory=list, max_length=10)
     expected_date: date | None = None
@@ -150,6 +161,7 @@ class AdminCustomOrderResponse(BaseModel):
     customer_phone: str
     taken_at: datetime
     taken_by_admin_id: int | None
+    taken_by_email: str | None = None
     karigar_id: int | None
     karigar_name: str | None = None
     status_id: int

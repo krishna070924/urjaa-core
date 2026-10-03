@@ -9,6 +9,7 @@ move, a rejected bad phone number, and the reopen rule on terminal statuses.
 Run: .venv/bin/python tests/test_custom_orders.py
 """
 import os
+from datetime import datetime, timedelta, timezone
 
 os.environ.setdefault("DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/urjaa")
 
@@ -124,6 +125,17 @@ def main() -> None:
             pass
         assert CustomOrderUpdateRequest(design_notes=None).design_notes is None  # clearing notes is fine
         print("explicit null on required field -> 422               OK")
+
+        try:
+            CustomOrderCreateRequest(customer_name="A", customer_phone="9876543210", taken_at=datetime.now(timezone.utc) + timedelta(days=2))
+            raise AssertionError("future taken_at accepted")
+        except ValidationError:
+            pass
+        past = datetime.now(timezone.utc) - timedelta(days=3)
+        back = AdminCustomOrderService.create_order(db, store_id=store.id, admin_id=None, payload=CustomOrderCreateRequest(customer_name="Late Entry", customer_phone="9876543210", taken_at=past))
+        assert abs((back["taken_at"] - past).total_seconds()) < 2, back["taken_at"]
+        assert "taken_by_email" in back
+        print("taken_at settable (not future); taken_by_email in response OK")
 
         # 6. reopen rule: delivered/cancelled need reopen=true to move further.
         order = AdminCustomOrderService.set_status(

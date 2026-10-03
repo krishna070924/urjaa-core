@@ -87,6 +87,7 @@ class AdminCustomOrderService:
             "customer_phone": order.customer_phone,
             "taken_at": order.taken_at,
             "taken_by_admin_id": order.taken_by_admin_id,
+            "taken_by_email": order.taken_by_admin.email if order.taken_by_admin else None,
             "karigar_id": order.karigar_id,
             "karigar_name": order.karigar.name if order.karigar else None,
             "status_id": order.status_id,
@@ -117,7 +118,9 @@ class AdminCustomOrderService:
     @staticmethod
     def _base_query(db: Session):
         return db.query(CustomOrder).options(
-            joinedload(CustomOrder.status), joinedload(CustomOrder.karigar)
+            joinedload(CustomOrder.status),
+            joinedload(CustomOrder.karigar),
+            joinedload(CustomOrder.taken_by_admin),
         )
 
     @staticmethod
@@ -188,6 +191,8 @@ class AdminCustomOrderService:
             customer_phone=payload.customer_phone,
             taken_by_admin_id=admin_id,
             status_id=status.id,
+            # Orders are often logged after the fact; default is now.
+            **({"taken_at": payload.taken_at} if payload.taken_at else {}),
             design_notes=payload.design_notes,
             reference_image_urls=payload.reference_image_urls,
             expected_date=payload.expected_date,
