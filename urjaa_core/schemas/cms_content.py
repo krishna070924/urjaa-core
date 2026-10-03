@@ -56,12 +56,20 @@ def _no_duplicates(values: list) -> list:
 # Home page
 # =============================================================================
 
-class HeroContent(BaseModel):
+class HeroSlideLink(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["collection", "category"]
+    id: int
+
+
+class HeroSlide(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     media_type: Literal["image", "video"]
     media_url: RequiredMediaUrl
     poster_url: MediaUrl = None
+    link: HeroSlideLink | None = None
 
 
 class ShopByCategoryTile(BaseModel):
@@ -101,11 +109,13 @@ class ExclusiveOffersContent(BaseModel):
 
 
 class BestSellersContent(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    """D42: automatic — up to 8 active products tagged "Bestseller", resolved
+    at storefront-read time (see cms_service.resolve_home_for_storefront).
+    No admin-editable content; the manual `product_ids` picker this used to
+    carry is gone (old saved rows that still have it are tolerated — see
+    cms_service._normalize_home_raw, which drops the field on read)."""
 
-    product_ids: Annotated[list[UUID], Field(max_length=8), AfterValidator(_no_duplicates)] = Field(
-        default_factory=list
-    )
+    model_config = ConfigDict(extra="forbid")
 
 
 class CuratedCollectionsTile(BaseModel):
@@ -187,8 +197,8 @@ class StoneStoriesContent(BaseModel):
 class CuratedByUrjaaContent(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    # D39: Curated by Urjaa = 3 products.
-    product_ids: Annotated[list[UUID], Field(max_length=3), AfterValidator(_no_duplicates)] = Field(
+    # D40 (supersedes D39's 3): Curated by Urjaa = up to 8 products.
+    product_ids: Annotated[list[UUID], Field(max_length=8), AfterValidator(_no_duplicates)] = Field(
         default_factory=list
     )
 
@@ -213,8 +223,10 @@ class HomePageContent(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    # None = keep the designed hero media.
-    hero: HeroContent | None = None
+    # D41: hero is a carousel, 0-8 slides. [] = keep the designed hero.
+    # Only slide 1 (index 0) may be a video; slide 1's link is optional,
+    # every photo slide after it must carry a link.
+    hero_slides: Annotated[list[HeroSlide], Field(max_length=8)] = Field(default_factory=list)
     shop_by_category: Annotated[list[ShopByCategoryTile], Field(max_length=8)] = Field(default_factory=list)
     deck: DeckContent = Field(default_factory=DeckContent)
     exclusive_offers: ExclusiveOffersContent = Field(default_factory=ExclusiveOffersContent)
@@ -232,6 +244,18 @@ class HomePageContent(BaseModel):
         ids = [tile.category_id for tile in value]
         if len(ids) != len(set(ids)):
             raise ValueError("Duplicate category ids are not allowed")
+        return value
+
+    @field_validator("hero_slides")
+    @classmethod
+    def _validate_hero_slides(cls, value: list[HeroSlide]) -> list[HeroSlide]:
+        for i, slide in enumerate(value):
+            if i == 0:
+                continue
+            if slide.media_type == "video":
+                raise ValueError("Only the first hero slide may be a video")
+            if slide.link is None:
+                raise ValueError(f"Hero slide {i + 1} must have a link (only slide 1's link is optional)")
         return value
 
 

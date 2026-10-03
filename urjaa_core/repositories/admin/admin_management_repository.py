@@ -756,8 +756,8 @@ class AdminManagementRepository:
         return items, total
 
     @staticmethod
-    def get_all_products_with_relations(db: Session) -> list[Product]:
-        return (
+    def get_all_products_with_relations(db: Session, tag_id: int | None = None) -> list[Product]:
+        query = (
             db.query(Product)
             .options(
                 selectinload(Product.subcategory),
@@ -767,6 +767,13 @@ class AdminManagementRepository:
             )
             # H-08: default admin list (cross-store) hides soft-deleted products.
             .filter(Product.deleted_at.is_(None))
+        )
+        if tag_id is not None:
+            query = query.join(ProductTag, ProductTag.product_id == Product.id).filter(
+                ProductTag.tag_id == tag_id
+            )
+        return (
+            query
             .order_by(Product.updated_at.desc().nullslast(), Product.created_at.desc().nullslast())
             .all()
         )

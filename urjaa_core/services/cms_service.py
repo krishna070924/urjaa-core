@@ -19,12 +19,14 @@ from uuid import UUID
 
 from fastapi import HTTPException
 from pydantic import BaseModel, ValidationError
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from urjaa_core.models.category import Category
 from urjaa_core.models.collection import Collection
 from urjaa_core.models.product import Product
 from urjaa_core.models.stone import Stone
+from urjaa_core.models.tag import Tag
 from urjaa_core.models.website_config import WebsiteConfig
 from urjaa_core.repositories.product_repository import ProductRepository
 from urjaa_core.schemas.cms_content import HomePageContent, OurStoryContent
@@ -34,6 +36,8 @@ from urjaa_core.utils.currency import format_price_or_request
 
 
 MAX_VERSIONS = 5
+MAX_BEST_SELLERS = 8
+BESTSELLER_TAG_NAME = "Bestseller"
 
 PAGE_MODELS: dict[str, type[BaseModel]] = {
     "home": HomePageContent,
@@ -46,7 +50,7 @@ PAGE_STORAGE_KEYS: dict[str, str] = {
 }
 
 _EMPTY_HOME_RESOLVED: dict[str, Any] = {
-    "hero": None,
+    "hero_slides": [],
     "shop_by_category": [],
     "deck": {"products": []},
     "exclusive_offers": {"slots": [{"image_url": None}, {"image_url": None}, {"image_url": None}]},
@@ -71,6 +75,39 @@ def _require_page(page: str) -> None:
 
 def _get_row(db: Session, page: str) -> WebsiteConfig | None:
     return db.query(WebsiteConfig).filter(WebsiteConfig.key == PAGE_STORAGE_KEYS[page]).first()
+
+
+def _normalize_home_raw(raw: dict[str, Any]) -> dict[str, Any]:
+    """O-02 backward compat for Home content saved before this change:
+    - old single `hero` object -> one-slide `hero_slides` list (no link).
+    - old `best_sellers.product_ids` (manual picks, replaced by the
+      Bestseller tag, D42) is dropped rather than rejected.
+    Applied on every read path (get_page, restore, storefront resolve) so
+    pre-existing rows keep working with no DB migration.
+    """
+    if not isinstance(raw, dict):
+        return raw
+    raw = dict(raw)
+
+    old_hero = raw.pop("hero", "absent")
+    if "hero_slides" not in raw and old_hero != "absent":
+        if isinstance(old_hero, dict) and old_hero.get("media_url"):
+            raw["hero_slides"] = [
+                {
+                    "media_type": old_hero.get("media_type", "image"),
+                    "media_url": old_hero["media_url"],
+                    "poster_url": old_hero.get("poster_url"),
+                    "link": None,
+                }
+            ]
+        else:
+            raw["hero_slides"] = []
+
+    best_sellers = raw.get("best_sellers")
+    if isinstance(best_sellers, dict) and "product_ids" in best_sellers:
+        raw["best_sellers"] = {k: v for k, v in best_sellers.items() if k != "product_ids"}
+
+    return raw
 
 
 def _validate_products(db: Session, product_ids: set[UUID]) -> list[str]:
@@ -103,6 +140,9 @@ def _validate_references(db: Session, page: str, content: BaseModel) -> list[str
     warnings: list[str] = []
 
     category_ids = {tile.category_id for tile in content.shop_by_category}
+    category_ids |= {
+        slide.link.id for slide in content.hero_slides if slide.link and slide.link.kind == "category"
+    }
     if category_ids:
         found = {
             row.id
@@ -115,6 +155,9 @@ def _validate_references(db: Session, page: str, content: BaseModel) -> list[str
             raise HTTPException(status_code=400, detail=f"Unknown category id(s): {sorted(missing)}")
 
     collection_ids = {tile.collection_id for tile in content.curated_collections.tiles}
+    collection_ids |= {
+        slide.link.id for slide in content.hero_slides if slide.link and slide.link.kind == "collection"
+    }
     if collection_ids:
         found = {row.id for row in db.query(Collection.id).filter(Collection.id.in_(collection_ids))}
         missing = collection_ids - found
@@ -128,11 +171,7 @@ def _validate_references(db: Session, page: str, content: BaseModel) -> list[str
         if missing:
             raise HTTPException(status_code=400, detail=f"Unknown stone id(s): {sorted(missing)}")
 
-    product_ids = (
-        set(content.deck.product_ids)
-        | set(content.best_sellers.product_ids)
-        | set(content.curated_by_urjaa.product_ids)
-    )
+    product_ids = set(content.deck.product_ids) | set(content.curated_by_urjaa.product_ids)
     warnings.extend(_validate_products(db, product_ids))
     return warnings
 
@@ -151,7 +190,10 @@ def get_page(db: Session, page: str) -> tuple[dict[str, Any] | None, list[dict[s
         for i, v in enumerate(versions_raw)
         if isinstance(v, dict)
     ]
-    return (current if isinstance(current, dict) else None), versions
+    current = current if isinstance(current, dict) else None
+    if current is not None and page == "home":
+        current = _normalize_home_raw(current)
+    return current, versions
 
 
 def _push_current_into_versions(value: dict[str, Any], versions: list) -> list:
@@ -215,9 +257,12 @@ def restore_version(db: Session, page: str, index: int, saved_by: str) -> tuple[
         raise HTTPException(status_code=404, detail="Version not found")
 
     model_cls = PAGE_MODELS[page]
+    target_content = target["content"]
+    if page == "home":
+        target_content = _normalize_home_raw(target_content)
     try:
         # Re-validate: the schema may have evolved since this version was saved.
-        content_model = model_cls.model_validate(target["content"])
+        content_model = model_cls.model_validate(target_content)
     except ValidationError as exc:
         raise HTTPException(status_code=422, detail=exc.errors())
     warnings = _validate_references(db, page, content_model)
@@ -242,23 +287,19 @@ def restore_version(db: Session, page: str, index: int, saved_by: str) -> tuple[
 # Storefront resolution (public, read-only)
 # =============================================================================
 
-def _resolve_products(db: Session, product_ids: list[UUID]) -> dict[UUID, dict[str, Any]]:
-    if not product_ids:
-        return {}
-    products = ProductRepository.get_products_by_ids(db, store_id=None, product_ids=product_ids)
+def _price_products(db: Session, products: list[Product]) -> list[dict[str, Any]]:
+    """Shared no-N+1 pricing pass: one discount map, one rate cache, for
+    however many products were already fetched — same pattern as
+    ProductService.get_products."""
     if not products:
-        return {}
-
-    # Same no-N+1 pattern as ProductService.get_products: one discount map,
-    # one rate cache, shared across every product being priced.
+        return []
     rate_cache: dict = {}
     discount_map = PricingService.resolve_best_discounts(
         db,
         store_ids={product.store_id for product in products},
         product_ids={product.id for product in products},
     )
-
-    resolved: dict[UUID, dict[str, Any]] = {}
+    cards = []
     for product in products:
         priced = PricingService.price_product_starting(product, db, rate_cache=rate_cache, discount_map=discount_map)
         product.starting_price = priced.price
@@ -266,8 +307,28 @@ def _resolve_products(db: Session, product_ids: list[UUID]) -> dict[UUID, dict[s
         product.original_price = priced.original_price
         product.discount_percent = priced.discount_percent
         product.discount_ends_at = priced.discount_ends_at
-        resolved[product.id] = ProductResponse.model_validate(product, from_attributes=True).model_dump(mode="json")
-    return resolved
+        cards.append(ProductResponse.model_validate(product, from_attributes=True).model_dump(mode="json"))
+    return cards
+
+
+def _resolve_products(db: Session, product_ids: list[UUID]) -> dict[UUID, dict[str, Any]]:
+    if not product_ids:
+        return {}
+    products = ProductRepository.get_products_by_ids(db, store_id=None, product_ids=product_ids)
+    return {UUID(card["id"]): card for card in _price_products(db, products)}
+
+
+def _resolve_best_sellers(db: Session) -> list[dict[str, Any]]:
+    """D42: Best Sellers is automatic — up to 8 active products tagged
+    "Bestseller", best-selling first (same sort as the catalog's
+    best_selling query)."""
+    tag = db.query(Tag).filter(func.lower(Tag.name) == BESTSELLER_TAG_NAME.lower()).first()
+    if tag is None:
+        return []
+    products, _total = ProductRepository.get_products(
+        db, store_id=None, tag_slug=tag.slug, sort="best_selling", limit=MAX_BEST_SELLERS
+    )
+    return _price_products(db, products)
 
 
 def _resolve_categories(db: Session, category_ids: list[int]) -> dict[int, dict[str, Any]]:
@@ -284,6 +345,38 @@ def _resolve_collections(db: Session, collection_ids: list[int]) -> dict[int, di
     return {row.id: {"id": row.id, "name": row.name, "slug": row.slug} for row in rows}
 
 
+def _hero_link_href(kind: str, slug: str) -> str:
+    return f"/collections?category={slug}" if kind == "category" else f"/collections?collection={slug}"
+
+
+def _resolve_hero_slides(
+    db: Session,
+    slides: list,
+    categories_by_id: dict[int, dict[str, Any]],
+    collections_by_id: dict[int, dict[str, Any]],
+) -> list[dict[str, Any]]:
+    resolved = []
+    for slide in slides:
+        card = {"media_type": slide.media_type, "media_url": slide.media_url, "poster_url": slide.poster_url}
+        link = None
+        if slide.link:
+            entity = (
+                categories_by_id.get(slide.link.id)
+                if slide.link.kind == "category"
+                else collections_by_id.get(slide.link.id)
+            )
+            if entity:
+                link = {
+                    "kind": slide.link.kind,
+                    "slug": entity["slug"],
+                    "name": entity["name"],
+                    "href": _hero_link_href(slide.link.kind, entity["slug"]),
+                }
+        card["link"] = link
+        resolved.append(card)
+    return resolved
+
+
 def resolve_home_for_storefront(db: Session) -> dict[str, Any]:
     current, _ = get_page(db, "home")
     if current is None:
@@ -292,16 +385,19 @@ def resolve_home_for_storefront(db: Session) -> dict[str, Any]:
     content = HomePageContent.model_validate(current)
 
     product_ids = list(
-        dict.fromkeys(
-            [*content.deck.product_ids, *content.best_sellers.product_ids, *content.curated_by_urjaa.product_ids]
-        )
+        dict.fromkeys([*content.deck.product_ids, *content.curated_by_urjaa.product_ids])
     )
     category_ids = [tile.category_id for tile in content.shop_by_category]
+    category_ids += [slide.link.id for slide in content.hero_slides if slide.link and slide.link.kind == "category"]
     collection_ids = [tile.collection_id for tile in content.curated_collections.tiles]
+    collection_ids += [
+        slide.link.id for slide in content.hero_slides if slide.link and slide.link.kind == "collection"
+    ]
 
     products_by_id = _resolve_products(db, product_ids)
     categories_by_id = _resolve_categories(db, category_ids)
     collections_by_id = _resolve_collections(db, collection_ids)
+    best_sellers = _resolve_best_sellers(db)
     stone_ids = [tile.stone_id for tile in content.stone_stories.tiles]
     stone_names = (
         {row.id: row.name for row in db.query(Stone.id, Stone.name).filter(Stone.id.in_(stone_ids))}
@@ -310,7 +406,7 @@ def resolve_home_for_storefront(db: Session) -> dict[str, Any]:
     )
 
     return {
-        "hero": content.hero.model_dump(mode="json") if content.hero else None,
+        "hero_slides": _resolve_hero_slides(db, content.hero_slides, categories_by_id, collections_by_id),
         "shop_by_category": [
             {**categories_by_id[tile.category_id], "image": tile.image_url}
             for tile in content.shop_by_category
@@ -322,9 +418,7 @@ def resolve_home_for_storefront(db: Session) -> dict[str, Any]:
         "exclusive_offers": {
             "slots": [slot.model_dump(mode="json") for slot in content.exclusive_offers.slots]
         },
-        "best_sellers": {
-            "products": [products_by_id[pid] for pid in content.best_sellers.product_ids if pid in products_by_id]
-        },
+        "best_sellers": {"products": best_sellers},
         "curated_collections": {
             "tiles": [
                 {**collections_by_id[tile.collection_id], "image": tile.image_url}
