@@ -64,6 +64,9 @@ class SaleCreateRequest(BaseModel):
     quantity: int = Field(gt=0)
     weight: float | None = Field(default=None, ge=0)
     final_price: float = Field(ge=0)
+    # Review 8: on-the-spot discount (₹) given at the counter; final_price is
+    # already net of it. Shown on the invoice.
+    discount_amount: float = Field(default=0, ge=0)
     date_time: datetime | None = None
     # D22: required for items tracked piece by piece — which pieces left the counter.
     unit_ids: list[int] | None = None
@@ -75,6 +78,9 @@ class BulkSaleItemRequest(BaseModel):
     quantity: int = Field(gt=0)
     weight: float | None = Field(default=None, ge=0)
     final_price: float = Field(ge=0)
+    # Review 8: on-the-spot discount (₹) given at the counter; final_price is
+    # already net of it. Shown on the invoice.
+    discount_amount: float = Field(default=0, ge=0)
     unit_ids: list[int] | None = None
 
 
@@ -97,6 +103,7 @@ class SaleResponse(BaseModel):
     quantity: int
     total_amount: Decimal
     final_price: Decimal
+    discount_amount: Decimal = Decimal("0")
     cost_price: Decimal
     profit: Decimal
     source: Literal["store", "website"]

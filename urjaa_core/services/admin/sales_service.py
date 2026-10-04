@@ -151,6 +151,7 @@ class SalesService:
             "quantity": sale.quantity,
             "total_amount": total_amount,
             "final_price": float(sale.final_price),
+            "discount_amount": max(0.0, round(total_amount - float(sale.final_price or 0), 2)),
             "cost_price": total_cost_price,
             "profit": total_profit,
             "source": sale.source,
@@ -257,7 +258,8 @@ class SalesService:
             variant_id=item.variant_id,
             customer_id=customer_id,
             quantity=item.quantity,
-            total_amount=item.final_price,
+            # total_amount = price before the counter discount; final_price = charged.
+            total_amount=item.final_price + getattr(item, "discount_amount", 0),
             final_price=item.final_price,
             cost_price=total_cost_price,
             profit=total_profit,
@@ -767,21 +769,32 @@ class SalesService:
         y -= 18
         pdf.setFont("Helvetica", 11)
         grand_total = 0.0
+        subtotal = 0.0
         for sale in sales:
             product_name = sale.product.name if sale.product else "Unknown Product"
-            sku_code = (sale.variant.sku_code if sale.variant else None) or "-"
             line_total = float(sale.final_price)
+            line_price = max(line_total, float(sale.total_amount or line_total))
             grand_total += line_total
-            pdf.drawString(
-                40,
-                y,
-                f"{product_name} (SKU: {sku_code}) x{sale.quantity} - INR {line_total:,.2f}",
-            )
+            subtotal += line_price
+            pdf.drawString(40, y, f"{product_name} x{sale.quantity}")
+            pdf.drawRightString(width - 40, y, f"INR {line_price:,.2f}")
             y -= 16
+            if line_price > line_total:
+                pdf.drawString(56, y, "Discount")
+                pdf.drawRightString(width - 40, y, f"- INR {line_price - line_total:,.2f}")
+                y -= 16
 
         y -= 12
+        if subtotal > grand_total:
+            pdf.drawString(40, y, "Subtotal")
+            pdf.drawRightString(width - 40, y, f"INR {subtotal:,.2f}")
+            y -= 16
+            pdf.drawString(40, y, "Discount")
+            pdf.drawRightString(width - 40, y, f"- INR {subtotal - grand_total:,.2f}")
+            y -= 18
         pdf.setFont("Helvetica-Bold", 12)
-        pdf.drawString(40, y, f"Grand Total: INR {grand_total:,.2f}")
+        pdf.drawString(40, y, "Grand Total")
+        pdf.drawRightString(width - 40, y, f"INR {grand_total:,.2f}")
 
         pdf.showPage()
         pdf.save()
