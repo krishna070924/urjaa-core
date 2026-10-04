@@ -290,13 +290,18 @@ def test_build_invoice_pdf_covers_all_order_lines():
         prices = [15000.00, 8000.00, 2500.00]
         payload = BulkSaleCreateRequest(
             items=[
-                BulkSaleItemRequest(product_id=product.id, variant_id=v.id, quantity=1, final_price=p)
-                for v, p in zip(variants, prices)
+                # Review 8: first line carries an on-the-spot discount of 1,000.
+                BulkSaleItemRequest(product_id=product.id, variant_id=v.id, quantity=1, final_price=p, discount_amount=1000 if i == 0 else 0)
+                for i, (v, p) in enumerate(zip(variants, prices))
             ]
         )
         result = SalesService.create_bulk_sale(db, store_id=store.id, payload=payload)
         sale_ids.extend(result["created_sale_ids"])
         order_ids.append(result["order_id"])
+
+        first = db.query(Sale).filter(Sale.id == result["created_sale_ids"][0]).one()
+        assert float(first.final_price) == 15000.0 and float(first.total_amount) == 16000.0, (first.final_price, first.total_amount)
+        assert SalesService._to_sale_response(first)["discount_amount"] == 1000.0
 
         file_name, pdf_bytes = SalesService.build_invoice_pdf(db, store_id=store.id, order_id=result["order_id"])
 
@@ -305,13 +310,16 @@ def test_build_invoice_pdf_covers_all_order_lines():
         assert order.invoice_number in file_name
         assert file_name.endswith(".pdf")
 
-        # Every line's SKU must appear in the rendered (ASCII85+Flate-encoded) content stream.
+        # Rendered (ASCII85+Flate-encoded) content: one line per item, the
+        # discount shown, SKUs (internal) not printed.
         content = b"".join(
             zlib.decompress(base64.a85decode(raw.rstrip(b"\r\n").removesuffix(b"~>")))
             for raw in re.findall(rb"stream\r?\n(.*?)endstream", pdf_bytes, re.DOTALL)
         )
+        assert content.count(b"Test Ring x1") == 3, content.count(b"Test Ring x1")
+        assert b"- INR 1,000.00" in content and b"INR 26,500.00" in content
         for v in variants:
-            assert v.sku_code.encode() in content, f"missing line for {v.sku_code}"
+            assert v.sku_code.encode() not in content, f"SKU printed for {v.sku_code}"
 
         expected_total = round(sum(prices), 2)
         assert round(float(order.total_amount), 2) == expected_total
