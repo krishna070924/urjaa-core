@@ -19,9 +19,11 @@ from urjaa_core.core.user_auth import (
     hash_user_password,
     normalize_user_email,
 )
+from urjaa_core.models.base_metal import BaseMetal
 from urjaa_core.models.order import Order
 from urjaa_core.models.sale import Sale
 from urjaa_core.models.store import Store
+from urjaa_core.models.store_return import OldGoldItem, SaleReturn, SaleReturnLine, StoreCreditEntry
 from urjaa_core.models.user import User
 from urjaa_core.repositories.admin.sales_repository import SalesRepository
 from urjaa_core.services import physical_unit_service
@@ -32,7 +34,9 @@ from urjaa_core.schemas.admin.sales import (
     BulkSaleItemRequest,
     CustomerCreateRequest,
     CustomerUpdateRequest,
+    OldGoldItemRequest,
     SaleCreateRequest,
+    SalePaymentRequest,
 )
 
 
@@ -41,6 +45,18 @@ from urjaa_core.schemas.admin.sales import (
 GST_HALF_RATE = Decimal("0.015")
 HSN_JEWELLERY = "7113"
 IST = ZoneInfo("Asia/Kolkata")
+PAISE = Decimal("0.01")
+METHOD_LABELS = {"cash": "Cash", "upi": "UPI", "card": "Card", "store_credit": "Store credit"}
+
+
+def ist_text(value: datetime) -> str:
+    """DB timestamps are naive UTC; bills print India time."""
+    aware = value if value.tzinfo else value.replace(tzinfo=UTC)
+    return aware.astimezone(IST).strftime("%d %b %Y %H:%M")
+
+
+def money(value) -> Decimal:
+    return Decimal(str(value)).quantize(PAISE, ROUND_HALF_UP)
 
 
 def split_gst(net_amount: float) -> tuple[Decimal, Decimal]:
@@ -55,8 +71,109 @@ class SalesService:
     SOURCE_WEBSITE: Literal["store", "website"] = "website"
 
     @staticmethod
-    def _to_customer_response(user: User, store_name: str | None = None) -> dict:
+    def store_credit_balance(db: Session, customer_id: UUID, *, lock: bool = False) -> Decimal:
+        """Sum of the customer's ledger. lock=True holds the customer row until
+        commit, so two bills can't both spend the same credit."""
+        if lock:
+            db.query(User.id).filter(User.id == customer_id).with_for_update().one()
+        return money(
+            db.query(func.coalesce(func.sum(StoreCreditEntry.amount), 0))
+            .filter(StoreCreditEntry.customer_id == customer_id)
+            .scalar()
+        )
+
+    @staticmethod
+    def require_named_customer(customer: User | None, what: str) -> None:
+        if customer is None:
+            raise HTTPException(
+                status_code=422,
+                detail=f"{what} needs the customer's name and phone number. Choose or add the customer -- "
+                "walk-in customer can't be used.",
+            )
+        # Same 10-digit mobile rule as alterations (CustomOrderCreateRequest):
+        # the UI enforced it, the server only checked "not empty".
+        try:
+            CustomOrderCreateRequest(customer_name=customer.full_name or "", customer_phone=customer.phone or "")
+        except ValidationError:
+            raise HTTPException(
+                status_code=422,
+                detail=f"{what} needs the customer's name and a valid 10-digit mobile number. Add or fix it for "
+                f"{customer.full_name or 'this customer'} in Store Customers first.",
+            )
+
+    @staticmethod
+    def _old_gold_rows(db: Session, items: list[OldGoldItemRequest]) -> list[OldGoldItem]:
+        rows = []
+        for item in items:
+            label = f"Old jewellery “{item.description}”"
+            if db.get(BaseMetal, item.base_metal_id) is None:
+                raise HTTPException(status_code=422, detail=f"{label}: choose the metal.")
+            net_weight = Decimal(str(item.gross_weight)) - Decimal(str(item.stone_weight))
+            if net_weight <= 0:
+                raise HTTPException(status_code=422, detail=f"{label}: stone weight must be less than the gross weight.")
+            gross_value = money(net_weight * Decimal(str(item.rate_per_gram)))
+            deduction = money(item.deduction_amount)
+            if deduction > 0 and not item.deduction_reason:
+                raise HTTPException(status_code=422, detail=f"{label}: write the reason for the deduction.")
+            if deduction > gross_value:
+                raise HTTPException(status_code=422, detail=f"{label}: the deduction is more than its value.")
+            rows.append(
+                OldGoldItem(
+                    description=item.description,
+                    base_metal_id=item.base_metal_id,
+                    purity=Decimal(str(item.purity)),
+                    gross_weight=Decimal(str(item.gross_weight)),
+                    stone_weight=Decimal(str(item.stone_weight)),
+                    net_weight=net_weight,
+                    rate_per_gram=money(item.rate_per_gram),
+                    deduction_amount=deduction,
+                    deduction_reason=item.deduction_reason if deduction > 0 else None,
+                    value=gross_value - deduction,
+                )
+            )
+        return rows
+
+    @staticmethod
+    def _payment_details(payment: SalePaymentRequest | None, amount_to_pay: Decimal) -> tuple[str | None, dict]:
+        if payment is None or amount_to_pay <= 0:
+            return None, {}
+        if payment.method == "split":
+            amounts = {key: money(getattr(payment, key)) for key in ("cash", "upi", "card") if getattr(payment, key) > 0}
+            paid = sum(amounts.values(), Decimal(0))
+            if paid != amount_to_pay:
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"The split amounts add up to ₹{paid:,.2f} but the amount to pay is ₹{amount_to_pay:,.2f}.",
+                )
+        else:
+            amounts = {payment.method: amount_to_pay}
+        details = {key: float(value) for key, value in amounts.items()}
+        if payment.reference:
+            details["reference"] = payment.reference
+        return payment.method, details
+
+    @staticmethod
+    def payment_label(order: Order) -> str:
+        """'Paid by' line on the bill. '—' for bills from before payment capture."""
+        details = order.payment_details or {}
+        parts = []
+        if order.payment_method:
+            amounts = [f"{METHOD_LABELS[key]} INR {details[key]:,.2f}" for key in ("cash", "upi", "card") if key in details]
+            parts.append(("Split: " + ", ".join(amounts)) if order.payment_method == "split" else METHOD_LABELS[order.payment_method])
+            if details.get("reference"):
+                parts.append(f"Ref {details['reference']}")
+        payout = details.get("payout")
+        if payout:
+            parts.append(
+                f"Balance INR {payout['amount']:,.2f} "
+                + ("added to store credit" if payout["method"] == "store_credit" else f"paid to customer by {METHOD_LABELS[payout['method']]}")
+            )
+        return " · ".join(parts) or "—"
+
+    @staticmethod
+    def _to_customer_response(user: User, store_name: str | None = None, store_credit_balance: Decimal | float = 0) -> dict:
         return {
+            "store_credit_balance": float(store_credit_balance),
             "id": user.id,
             "name": user.full_name,
             "store_id": user.last_store_id,
@@ -178,6 +295,7 @@ class SalesService:
             "stock_after": variant_stock,
             "is_low_stock": 0 < variant_stock <= SalesService.DEFAULT_LOW_STOCK_THRESHOLD,
             "is_out_of_stock": variant_stock <= 0,
+            "returned_quantity": sale.returned_quantity or 0,
         }
 
     @staticmethod
@@ -355,9 +473,18 @@ class SalesService:
             store_rows = db.query(Store.id, Store.name).filter(Store.id.in_(tagged_store_ids)).all()
             store_name_by_id = {store_id_row: store_name for store_id_row, store_name in store_rows}
 
+        balance_by_customer = dict(
+            db.query(StoreCreditEntry.customer_id, func.sum(StoreCreditEntry.amount))
+            .filter(StoreCreditEntry.customer_id.in_([item.id for item in items]))
+            .group_by(StoreCreditEntry.customer_id)
+            .all()
+        ) if items else {}
+
         return {
             "items": [
-                SalesService._to_customer_response(item, store_name_by_id.get(item.last_store_id))
+                SalesService._to_customer_response(
+                    item, store_name_by_id.get(item.last_store_id), balance_by_customer.get(item.id, 0)
+                )
                 for item in items
             ],
             "page": page,
@@ -465,7 +592,9 @@ class SalesService:
         if customer.last_store_id is not None:
             tagged_store_name = db.query(Store.name).filter(Store.id == customer.last_store_id).scalar()
 
-        return SalesService._to_customer_response(customer, tagged_store_name)
+        return SalesService._to_customer_response(
+            customer, tagged_store_name, SalesService.store_credit_balance(db, customer.id)
+        )
 
     @staticmethod
     def archive_customer(db: Session, store_id: UUID | None, customer_id: UUID) -> dict:
@@ -597,6 +726,40 @@ class SalesService:
                 total_profit += line_profit
 
             cgst, sgst = split_gst(round(total_amount, 2))
+            # GST stays on the new items' full taxable value; old jewellery and
+            # store credit are taken off the grand total after tax.
+            grand_total = money(round(total_amount, 2)) + cgst + sgst
+            old_gold_rows = SalesService._old_gold_rows(db, payload.old_gold)
+            if old_gold_rows:
+                SalesService.require_named_customer(customer, "Old jewellery exchange")
+            old_gold_total = sum((row.value for row in old_gold_rows), Decimal(0))
+            due = grand_total - old_gold_total
+
+            credit_used = money(payload.store_credit_used)
+            if credit_used > 0:
+                SalesService.require_named_customer(customer, "Using store credit")
+                if credit_used > max(due, Decimal(0)):
+                    raise HTTPException(status_code=422, detail="Store credit used can't be more than the amount to pay.")
+                balance = SalesService.store_credit_balance(db, customer.id, lock=True)
+                if credit_used > balance:
+                    raise HTTPException(
+                        status_code=422,
+                        detail=f"{customer.full_name} has only ₹{balance:,.2f} store credit.",
+                    )
+            amount_to_pay = max(due - credit_used, Decimal(0))
+            payable_to_customer = max(-due, Decimal(0))
+            if payable_to_customer > 0:
+                if payload.payout_method is None:
+                    raise HTTPException(
+                        status_code=422,
+                        detail="The old jewellery is worth more than the bill. Choose how the customer gets the difference.",
+                    )
+                if payload.payout_method == "store_credit":
+                    SalesService.require_named_customer(customer, "Adding to store credit")
+            payment_method, payment_details = SalesService._payment_details(payload.payment, amount_to_pay)
+            if payable_to_customer > 0:
+                payment_details["payout"] = {"method": payload.payout_method, "amount": float(payable_to_customer)}
+
             order = Order(
                 store_id=store_id,
                 user_id=None,
@@ -608,10 +771,28 @@ class SalesService:
                 status="COMPLETED",
                 source=source,
                 invoice_number=SalesService._generate_order_invoice_number(db, store_id, sale_time),
+                payment_method=payment_method,
+                payment_details=payment_details or None,
             )
             db.add(order)
             db.flush()
             order_id = order.id
+
+            for row in old_gold_rows:
+                row.order_id = order_id
+            db.add_all(old_gold_rows)
+            ledger = []
+            if credit_used > 0:
+                ledger.append((-credit_used, f"Used on bill {order.invoice_number}"))
+            if payable_to_customer > 0 and payload.payout_method == "store_credit":
+                ledger.append((payable_to_customer, f"Old jewellery exchange balance, bill {order.invoice_number}"))
+            for amount, note in ledger:
+                db.add(
+                    StoreCreditEntry(
+                        customer_id=customer.id, store_id=store_id, amount=amount,
+                        order_id=order_id, note=note, created_by_admin_id=admin_id,
+                    )
+                )
 
             for item, line_cost_price, line_profit, product_name in line_items:
                 sale = SalesService._build_sale_record(
@@ -636,6 +817,7 @@ class SalesService:
                         store_id=store_id,
                         admin_id=admin_id,
                         sale_order_id=order_id,
+                        sale_id=sale.id,
                         payload=CustomOrderCreateRequest(
                             customer_name=customer.full_name,
                             customer_phone=customer.phone,
@@ -663,6 +845,11 @@ class SalesService:
             "alterations": alterations,
             "total_cost_price": round(total_cost_price, 2),
             "total_profit": round(total_profit, 2),
+            "old_gold_total": float(old_gold_total),
+            "store_credit_used": float(credit_used),
+            "amount_to_pay": float(amount_to_pay),
+            "payable_to_customer": float(payable_to_customer),
+            "payout_method": payload.payout_method if payable_to_customer > 0 else None,
         }
 
     @staticmethod
@@ -718,9 +905,24 @@ class SalesService:
             customer_id=customer_id,
         )
 
+        # Credit notes per returned line (store returns), one query for the page.
+        credit_notes_by_sale: dict[UUID, list[dict]] = {}
+        returned_ids = [sale.id for sale in sales if sale.returned_quantity]
+        if returned_ids:
+            for sale_id, return_id, number in (
+                db.query(SaleReturnLine.sale_id, SaleReturn.id, SaleReturn.credit_note_number)
+                .join(SaleReturn, SaleReturn.id == SaleReturnLine.return_id)
+                .filter(SaleReturnLine.sale_id.in_(returned_ids))
+                .order_by(SaleReturn.id)
+            ):
+                credit_notes_by_sale.setdefault(sale_id, []).append({"id": return_id, "credit_note_number": number})
+
         pages = max(1, (total + limit - 1) // limit)
         return {
-            "items": [SalesService._to_sale_response(sale) for sale in sales],
+            "items": [
+                {**SalesService._to_sale_response(sale), "credit_notes": credit_notes_by_sale.get(sale.id, [])}
+                for sale in sales
+            ],
             "page": page,
             "limit": limit,
             "total": total,
@@ -831,7 +1033,7 @@ class SalesService:
         pdf.setFont("Helvetica", 11)
         pdf.drawString(40, y, f"Invoice Number: {invoice_number}")
         y -= 16
-        pdf.drawString(40, y, f"Invoice Date: {first_sale.date_time.strftime('%d %b %Y %H:%M')}")
+        pdf.drawString(40, y, f"Invoice Date: {ist_text(first_sale.date_time)}")
 
         y -= 30
         pdf.setFont("Helvetica-Bold", 12)
@@ -895,6 +1097,54 @@ class SalesService:
         pdf.setFont("Helvetica-Bold", 12)
         pdf.drawString(40, y, "Grand Total")
         pdf.drawRightString(width - 40, y, f"INR {net_total + tax:,.2f}")
+        y -= 18
+
+        def row(label: str, amount: str | None = None, *, x: int = 40, font: str = "Helvetica", size: int = 11) -> None:
+            nonlocal y
+            if y < 60:
+                pdf.showPage()
+                y = height - 40
+            pdf.setFont(font, size)
+            pdf.drawString(x, y, label)
+            if amount is not None:
+                pdf.drawRightString(width - 40, y, amount)
+            y -= size + 5
+
+        # Old jewellery and store credit come off after GST (stored, never recomputed).
+        old_items = order.old_gold_items
+        credit_used = -sum(
+            (entry.amount for entry in db.query(StoreCreditEntry).filter(
+                StoreCreditEntry.order_id == order.id, StoreCreditEntry.amount < 0
+            )),
+            Decimal(0),
+        )
+        if old_items:
+            y -= 8
+            row("Old jewellery taken in exchange", font="Helvetica-Bold", size=12)
+            for item in old_items:
+                metal = item.base_metal.name if item.base_metal else ""
+                row(
+                    f"{item.description} - {metal} {item.purity.normalize():f}%, net {item.net_weight.normalize():f} g "
+                    f"@ INR {item.rate_per_gram:,.2f}/g",
+                    f"INR {item.value:,.2f}",
+                    size=10,
+                )
+                if item.deduction_amount:
+                    row(f"(after deduction INR {item.deduction_amount:,.2f}: {item.deduction_reason})", x=56, size=10)
+            old_total = sum((item.value for item in old_items), Decimal(0))
+            row("Less: old jewellery exchange", f"- INR {old_total:,.2f}")
+        else:
+            old_total = Decimal(0)
+        if credit_used:
+            row("Less: store credit", f"- INR {credit_used:,.2f}")
+        if old_items or credit_used:
+            due = money(net_total + tax) - old_total - credit_used
+            if due >= 0:
+                row("Amount to pay", f"INR {due:,.2f}", font="Helvetica-Bold", size=12)
+            else:
+                row("Payable to customer", f"INR {-due:,.2f}", font="Helvetica-Bold", size=12)
+        y -= 6
+        row(f"Paid by: {SalesService.payment_label(order)}")
 
         pdf.showPage()
         pdf.save()

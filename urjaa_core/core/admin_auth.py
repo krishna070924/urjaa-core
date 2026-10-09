@@ -253,6 +253,22 @@ ADMIN_ROUTE_PERMISSION_RULES: list[dict[str, Any]] = [
         "any_of": {ADMIN_PERMISSION_VIEW_SALES, ADMIN_PERMISSION_MANAGE_SALES},
     },
     {
+        # Store returns: bill lines + past credit notes (GET), record a return (POST).
+        "pattern": re.compile(r"^/admin/sales/[^/]+/returns$"),
+        "methods": {"GET"},
+        "any_of": {ADMIN_PERMISSION_VIEW_SALES, ADMIN_PERMISSION_MANAGE_SALES},
+    },
+    {
+        "pattern": re.compile(r"^/admin/sales/[^/]+/returns$"),
+        "methods": {"POST"},
+        "any_of": {ADMIN_PERMISSION_MANAGE_SALES},
+    },
+    {
+        "pattern": re.compile(r"^/admin/sales/returns/\d+/credit-note$"),
+        "methods": {"GET"},
+        "any_of": {ADMIN_PERMISSION_VIEW_SALES, ADMIN_PERMISSION_MANAGE_SALES},
+    },
+    {
         "pattern": re.compile(r"^/admin/inventory/(summary|export)$"),
         "methods": {"GET"},
         "any_of": {ADMIN_PERMISSION_MANAGE_INVENTORY},

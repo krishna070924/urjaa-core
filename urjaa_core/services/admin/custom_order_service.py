@@ -189,6 +189,7 @@ class AdminCustomOrderService:
         admin_id: int | None,
         payload: CustomOrderCreateRequest,
         sale_order_id: UUID | None = None,
+        sale_id: UUID | None = None,
     ) -> dict:
         status = _status_by_code(db, ORDER_TAKEN_CODE)
         order = CustomOrder(
@@ -204,6 +205,7 @@ class AdminCustomOrderService:
             expected_date=payload.expected_date,
             # POS: alteration left at the counter -- the bill it came from.
             sale_order_id=sale_order_id,
+            sale_id=sale_id,
         )
         db.add(order)
         db.flush()
