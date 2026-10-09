@@ -90,10 +90,14 @@ class SalesService:
                 detail=f"{what} needs the customer's name and phone number. Choose or add the customer -- "
                 "walk-in customer can't be used.",
             )
-        if not (customer.full_name or "").strip() or not (customer.phone or "").strip():
+        # Same 10-digit mobile rule as alterations (CustomOrderCreateRequest):
+        # the UI enforced it, the server only checked "not empty".
+        try:
+            CustomOrderCreateRequest(customer_name=customer.full_name or "", customer_phone=customer.phone or "")
+        except ValidationError:
             raise HTTPException(
                 status_code=422,
-                detail=f"{what} needs the customer's name and phone number. Add the phone number for "
+                detail=f"{what} needs the customer's name and a valid 10-digit mobile number. Add or fix it for "
                 f"{customer.full_name or 'this customer'} in Store Customers first.",
             )
 
