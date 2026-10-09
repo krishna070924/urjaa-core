@@ -64,6 +64,10 @@ ADMIN_PERMISSION_VIEW_ANALYTICS = "view_analytics"
 ADMIN_PERMISSION_MANAGE_TICKETS = "manage_tickets"
 ADMIN_PERMISSION_VIEW_TICKETS = "view_tickets"
 ADMIN_PERMISSION_MANAGE_CAMPAIGNS = "manage_campaigns"
+# Review 9: changing the catalogue's building blocks (categories, collections,
+# tags, stones, metals, metal rates) is separate from editing products, so
+# the staff role can create/edit products without touching rates/setup.
+ADMIN_PERMISSION_MANAGE_CATALOG_SETUP = "manage_catalog_setup"
 
 ADMIN_PERMISSION_DESCRIPTIONS: dict[str, str] = {
     ADMIN_PERMISSION_MANAGE_USERS: "Manage admin users",
@@ -72,6 +76,7 @@ ADMIN_PERMISSION_DESCRIPTIONS: dict[str, str] = {
     ADMIN_PERMISSION_MANAGE_STORE: "Manage store locations and store details",
     ADMIN_PERMISSION_MANAGE_INVENTORY: "Manage inventory controls and metal settings",
     ADMIN_PERMISSION_MANAGE_PRODUCTS: "Create, update and delete products",
+    ADMIN_PERMISSION_MANAGE_CATALOG_SETUP: "Set up categories, collections, tags, stones, metals and metal rates",
     ADMIN_PERMISSION_MANAGE_CUSTOMERS: "Manage customer records and inbound contacts",
     ADMIN_PERMISSION_MANAGE_SALES: "Create and manage sales",
     ADMIN_PERMISSION_VIEW_SALES: "View sales data",
@@ -98,6 +103,7 @@ ROLE_DESCRIPTIONS: dict[str, str] = {
 DEFAULT_ROLE_PERMISSIONS: dict[str, set[str]] = {
     "super_admin": set(ADMIN_PERMISSION_DESCRIPTIONS.keys()),
     "admin": {
+        ADMIN_PERMISSION_MANAGE_CATALOG_SETUP,
         ADMIN_PERMISSION_MANAGE_WEBSITE,
         ADMIN_PERMISSION_MANAGE_CMS,
         ADMIN_PERMISSION_MANAGE_STORE,
@@ -115,6 +121,7 @@ DEFAULT_ROLE_PERMISSIONS: dict[str, set[str]] = {
         ADMIN_PERMISSION_MANAGE_CAMPAIGNS,
     },
     "manager": {
+        ADMIN_PERMISSION_MANAGE_CATALOG_SETUP,
         ADMIN_PERMISSION_MANAGE_ORDERS,
         ADMIN_PERMISSION_VIEW_ORDERS,
         ADMIN_PERMISSION_MANAGE_INVENTORY,
@@ -129,13 +136,15 @@ DEFAULT_ROLE_PERMISSIONS: dict[str, set[str]] = {
         ADMIN_PERMISSION_MANAGE_TICKETS,
         ADMIN_PERMISSION_VIEW_TICKETS,
     },
+    # Review 9 (owner): staff see only Sales (incl. custom orders), Catalogue
+    # and Inventory -- they can make sales and create/edit products and stock.
     "staff": {
         ADMIN_PERMISSION_MANAGE_PRODUCTS,
         ADMIN_PERMISSION_MANAGE_INVENTORY,
+        ADMIN_PERMISSION_MANAGE_SALES,
+        ADMIN_PERMISSION_VIEW_SALES,
         ADMIN_PERMISSION_MANAGE_ORDERS,
         ADMIN_PERMISSION_VIEW_ORDERS,
-        ADMIN_PERMISSION_MANAGE_CUSTOMERS,
-        ADMIN_PERMISSION_VIEW_TICKETS,
     },
     "support": {
         ADMIN_PERMISSION_VIEW_ORDERS,
@@ -298,14 +307,14 @@ ADMIN_ROUTE_PERMISSION_RULES: list[dict[str, Any]] = [
     {
         "pattern": re.compile(r"^/admin/(categories|subcategories|collections|tags|stones)(?:/.*)?$"),
         "methods": WRITE_METHODS,
-        "any_of": {ADMIN_PERMISSION_MANAGE_PRODUCTS},
+        "any_of": {ADMIN_PERMISSION_MANAGE_CATALOG_SETUP},
     },
     {
         # H-07: /admin/metals is the admin-generated combination dimension
         # (D26) — same bucket as the other metal lookups it's built from.
         "pattern": re.compile(r"^/admin/(metal-types|metal-purities|metal-colors|metal-rates|metals)(?:/.*)?$"),
         "methods": WRITE_METHODS,
-        "any_of": {ADMIN_PERMISSION_MANAGE_INVENTORY},
+        "any_of": {ADMIN_PERMISSION_MANAGE_CATALOG_SETUP},
     },
     # FIX 4.1: Add explicit GET permission rules for routes previously unprotected (fail-closed from Fix 1.3)
     {
