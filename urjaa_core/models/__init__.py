@@ -66,3 +66,6 @@ from .karigar import Karigar
 from .custom_order_status import CustomOrderStatus
 from .custom_order import CustomOrder
 from .custom_order_event import CustomOrderEvent
+
+# Store returns, store credit, old-jewellery exchange (0034/0035)
+from .store_return import OldGoldItem, SaleReturn, SaleReturnLine, StoreCreditEntry

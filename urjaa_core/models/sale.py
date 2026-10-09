@@ -28,6 +28,10 @@ class Sale(Base):
     date_time = Column(TIMESTAMP, server_default=func.now(), nullable=False)
     # POS: "resize to 14, ready by 16 Oct 2026" -- printed under the line on the bill.
     alteration_note = Column(Text, nullable=True)
+    # Store returns (0034): how much of this line came back, ex-GST. A CHECK
+    # keeps returned_quantity <= quantity.
+    returned_quantity = Column(Integer, nullable=False, default=0, server_default="0")
+    returned_amount = Column(DECIMAL(12, 2), nullable=False, default=0, server_default="0")
     created_at = Column(TIMESTAMP, server_default=func.now())
 
     product = relationship("Product")
@@ -41,3 +45,8 @@ class Sale(Base):
 # status (PROCESSING -> SHIPPED -> DELIVERED); counting only COMPLETED (the
 # in-store status) dropped every online order once staff moved it along.
 REVENUE_SALE_STATUSES = ("COMPLETED", "PROCESSING", "SHIPPED", "DELIVERED")
+
+# What Insights sum as revenue for a line: the charged price less anything
+# returned since (store returns). Website lines never have returns -> unchanged.
+NET_SALE_AMOUNT = Sale.final_price - Sale.returned_amount
+NET_SALE_QUANTITY = Sale.quantity - Sale.returned_quantity

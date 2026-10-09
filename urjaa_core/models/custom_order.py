@@ -30,6 +30,8 @@ class CustomOrder(Base):
     expected_date = Column(Date, nullable=True)
     # POS: set when a sold piece is left at the counter for alteration.
     sale_order_id = Column(UUID(as_uuid=True), ForeignKey("orders.id", ondelete="SET NULL"), nullable=True, index=True)
+    # ...and the bill line, so returning that line can cancel the alteration (0034).
+    sale_id = Column(UUID(as_uuid=True), ForeignKey("sales.id", ondelete="SET NULL"), nullable=True)
 
     created_at = Column(TIMESTAMP, server_default=func.now(), nullable=False)
     updated_at = Column(TIMESTAMP, server_default=func.now(), onupdate=func.now(), nullable=False)

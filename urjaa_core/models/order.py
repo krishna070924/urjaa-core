@@ -42,6 +42,10 @@ class Order(Base):
     source = Column(String(20), nullable=False, default="website", server_default="website")
     invoice_number = Column(String(50), unique=True, nullable=True)
     cancelled_at = Column(TIMESTAMP, nullable=True)
+    # POS (0034): 'cash' | 'upi' | 'card' | 'split'; details = amount per
+    # method, reference, payout to the customer. NULL on older bills.
+    payment_method = Column(String(10), nullable=True)
+    payment_details = Column(JSONB, nullable=True)
 
     # Post-purchase rating fields
     customer_rating = Column(Integer, nullable=True)
@@ -56,6 +60,7 @@ class Order(Base):
     user = relationship("User")
     sale = relationship("Sale", back_populates="order")
     post_purchase_triggers = relationship("PostPurchaseTrigger", back_populates="order")
+    old_gold_items = relationship("OldGoldItem", order_by="OldGoldItem.id")
 
     @property
     def formatted_total(self) -> str:

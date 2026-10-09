@@ -22,7 +22,7 @@ from urjaa_core.models.product_variant import ProductVariant
 from urjaa_core.models.stone import Stone
 from urjaa_core.models.subcategory import Subcategory
 from urjaa_core.models.tag import Tag
-from urjaa_core.models.sale import Sale
+from urjaa_core.models.sale import NET_SALE_AMOUNT, NET_SALE_QUANTITY, Sale
 
 
 class AdminManagementRepository:
@@ -170,13 +170,13 @@ class AdminManagementRepository:
 
         totals = (
             db.query(
-                func.coalesce(func.sum(Sale.final_price), 0).label("total_revenue"),
+                func.coalesce(func.sum(NET_SALE_AMOUNT), 0).label("total_revenue"),
                 func.coalesce(
-                    func.sum(case((Sale.source == "store", Sale.final_price), else_=0)),
+                    func.sum(case((Sale.source == "store", NET_SALE_AMOUNT), else_=0)),
                     0,
                 ).label("store_revenue"),
                 func.coalesce(
-                    func.sum(case((Sale.source == "website", Sale.final_price), else_=0)),
+                    func.sum(case((Sale.source == "website", NET_SALE_AMOUNT), else_=0)),
                     0,
                 ).label("website_revenue"),
                 func.coalesce(func.sum(profit_expr), 0).label("total_profit"),
@@ -190,16 +190,16 @@ class AdminManagementRepository:
             db.query(
                 Sale.product_id.label("product_id"),
                 Product.name.label("product_name"),
-                func.coalesce(func.sum(Sale.quantity), 0).label("units_sold"),
-                func.coalesce(func.sum(Sale.final_price), 0).label("revenue"),
+                func.coalesce(func.sum(NET_SALE_QUANTITY), 0).label("units_sold"),
+                func.coalesce(func.sum(NET_SALE_AMOUNT), 0).label("revenue"),
                 func.count(Sale.id).label("sales_count"),
             )
             .join(Product, Product.id == Sale.product_id)
             .filter(Sale.store_id == store_id)
             .group_by(Sale.product_id, Product.name)
             .order_by(
-                func.coalesce(func.sum(Sale.quantity), 0).desc(),
-                func.coalesce(func.sum(Sale.final_price), 0).desc(),
+                func.coalesce(func.sum(NET_SALE_QUANTITY), 0).desc(),
+                func.coalesce(func.sum(NET_SALE_AMOUNT), 0).desc(),
             )
             .limit(top_limit)
             .all()
@@ -240,11 +240,11 @@ class AdminManagementRepository:
             db.query(
                 func.date(Sale.date_time).label("date"),
                 func.coalesce(
-                    func.sum(case((Sale.source == "store", Sale.final_price), else_=0)),
+                    func.sum(case((Sale.source == "store", NET_SALE_AMOUNT), else_=0)),
                     0,
                 ).label("store"),
                 func.coalesce(
-                    func.sum(case((Sale.source == "website", Sale.final_price), else_=0)),
+                    func.sum(case((Sale.source == "website", NET_SALE_AMOUNT), else_=0)),
                     0,
                 ).label("website"),
                 func.coalesce(
