@@ -28,6 +28,8 @@ class Order(Base):
     shipping_address = Column(JSONB, nullable=False, default=dict)
 
     total_amount = Column(Numeric(12, 2), nullable=False)
+    # POS: GST frozen at sale time (store bills only; ex-GST total_amount + this = collected).
+    tax_amount = Column(Numeric(12, 2), nullable=False, default=0, server_default="0")
     currency = Column(String(3), nullable=False, default="INR", server_default="INR")
     payment_status = Column(
         Enum("unpaid", "paid", "refunded", name="order_payment_status"),

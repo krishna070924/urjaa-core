@@ -1,9 +1,9 @@
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 from uuid import UUID
-from typing import Literal
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StringConstraints
 
 from urjaa_core.schemas.order import OrderItemResponse, OrderResponse
 
@@ -72,6 +72,13 @@ class SaleCreateRequest(BaseModel):
     unit_ids: list[int] | None = None
 
 
+class SaleAlterationRequest(BaseModel):
+    """POS: customer bought the piece but left it at the counter for resizing."""
+
+    what: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=500)]
+    ready_by: date
+
+
 class BulkSaleItemRequest(BaseModel):
     product_id: UUID
     variant_id: UUID
@@ -82,6 +89,7 @@ class BulkSaleItemRequest(BaseModel):
     # already net of it. Shown on the invoice.
     discount_amount: float = Field(default=0, ge=0)
     unit_ids: list[int] | None = None
+    alteration: SaleAlterationRequest | None = None
 
 
 class BulkSaleCreateRequest(BaseModel):
@@ -114,10 +122,21 @@ class SaleResponse(BaseModel):
     is_out_of_stock: bool
 
 
+class BulkSaleAlterationResponse(BaseModel):
+    custom_order_id: int
+    product_name: str
+    ready_by: date
+
+
 class BulkSaleResponse(BaseModel):
     created_sale_ids: list[UUID]
     order_id: UUID | None = None
+    invoice_number: str | None = None
+    # total_amount = ex-GST, after discount; grand_total = what was collected.
     total_amount: float
+    tax_amount: float = 0
+    grand_total: float = 0
+    alterations: list[BulkSaleAlterationResponse] = Field(default_factory=list)
     total_cost_price: float
     total_profit: float
 

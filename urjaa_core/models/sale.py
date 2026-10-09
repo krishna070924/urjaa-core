@@ -1,6 +1,6 @@
 import uuid
 
-from sqlalchemy import Column, Integer, ForeignKey, DECIMAL, TIMESTAMP, String
+from sqlalchemy import Column, Integer, ForeignKey, DECIMAL, TIMESTAMP, String, Text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -26,6 +26,8 @@ class Sale(Base):
     source = Column(String(20), nullable=False, default="store", server_default="store")
     status = Column(String(20), nullable=False, default="COMPLETED", server_default="COMPLETED")
     date_time = Column(TIMESTAMP, server_default=func.now(), nullable=False)
+    # POS: "resize to 14, ready by 16 Oct 2026" -- printed under the line on the bill.
+    alteration_note = Column(Text, nullable=True)
     created_at = Column(TIMESTAMP, server_default=func.now())
 
     product = relationship("Product")

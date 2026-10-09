@@ -28,6 +28,8 @@ class CustomOrder(Base):
     design_notes = Column(Text, nullable=True)
     reference_image_urls = Column(JSONB, nullable=False, default=list)
     expected_date = Column(Date, nullable=True)
+    # POS: set when a sold piece is left at the counter for alteration.
+    sale_order_id = Column(UUID(as_uuid=True), ForeignKey("orders.id", ondelete="SET NULL"), nullable=True, index=True)
 
     created_at = Column(TIMESTAMP, server_default=func.now(), nullable=False)
     updated_at = Column(TIMESTAMP, server_default=func.now(), onupdate=func.now(), nullable=False)

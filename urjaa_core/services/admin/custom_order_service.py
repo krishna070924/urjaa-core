@@ -96,6 +96,7 @@ class AdminCustomOrderService:
             "design_notes": order.design_notes,
             "reference_image_urls": order.reference_image_urls or [],
             "expected_date": order.expected_date,
+            "sale_order_id": order.sale_order_id,
             "created_at": order.created_at,
             "updated_at": order.updated_at,
         }
@@ -182,7 +183,12 @@ class AdminCustomOrderService:
 
     @staticmethod
     def create_order(
-        db: Session, *, store_id: UUID, admin_id: int | None, payload: CustomOrderCreateRequest
+        db: Session,
+        *,
+        store_id: UUID,
+        admin_id: int | None,
+        payload: CustomOrderCreateRequest,
+        sale_order_id: UUID | None = None,
     ) -> dict:
         status = _status_by_code(db, ORDER_TAKEN_CODE)
         order = CustomOrder(
@@ -196,6 +202,8 @@ class AdminCustomOrderService:
             design_notes=payload.design_notes,
             reference_image_urls=payload.reference_image_urls,
             expected_date=payload.expected_date,
+            # POS: alteration left at the counter -- the bill it came from.
+            sale_order_id=sale_order_id,
         )
         db.add(order)
         db.flush()

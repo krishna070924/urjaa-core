@@ -170,6 +170,7 @@ class AdminCustomOrderResponse(BaseModel):
     design_notes: str | None
     reference_image_urls: list[str]
     expected_date: date | None
+    sale_order_id: UUID | None = None
     created_at: datetime
     updated_at: datetime
 
