@@ -1,12 +1,15 @@
 import csv
 from contextlib import contextmanager
 from datetime import datetime, timezone; UTC = timezone.utc
+from decimal import ROUND_HALF_UP, Decimal
 from io import BytesIO, StringIO
 import secrets
 from typing import Literal
 from uuid import UUID, uuid4
+from zoneinfo import ZoneInfo
 
 from fastapi import HTTPException
+from pydantic import ValidationError
 from sqlalchemy import func, text
 from sqlalchemy.orm import Session
 
@@ -22,6 +25,8 @@ from urjaa_core.models.store import Store
 from urjaa_core.models.user import User
 from urjaa_core.repositories.admin.sales_repository import SalesRepository
 from urjaa_core.services import physical_unit_service
+from urjaa_core.services.admin.custom_order_service import AdminCustomOrderService
+from urjaa_core.schemas.admin.custom_orders import CustomOrderCreateRequest
 from urjaa_core.schemas.admin.sales import (
     BulkSaleCreateRequest,
     BulkSaleItemRequest,
@@ -29,6 +34,19 @@ from urjaa_core.schemas.admin.sales import (
     CustomerUpdateRequest,
     SaleCreateRequest,
 )
+
+
+# Owner decision (POS): store prices exclude GST; the bill adds 3% on the
+# post-discount amount, split CGST 1.5% + SGST 1.5%. HSN 7113 = jewellery.
+GST_HALF_RATE = Decimal("0.015")
+HSN_JEWELLERY = "7113"
+IST = ZoneInfo("Asia/Kolkata")
+
+
+def split_gst(net_amount: float) -> tuple[Decimal, Decimal]:
+    """(cgst, sgst) on an ex-GST amount -- equal halves, so they always sum to the tax."""
+    half = (Decimal(str(net_amount)) * GST_HALF_RATE).quantize(Decimal("0.01"), ROUND_HALF_UP)
+    return half, half
 
 
 class SalesService:
@@ -319,14 +337,16 @@ class SalesService:
         page: int,
         limit: int,
         include_deleted: bool = False,
+        search: str | None = None,
     ) -> dict:
-        total = SalesRepository.count_customers(db, include_deleted=include_deleted)
+        total = SalesRepository.count_customers(db, include_deleted=include_deleted, search=search)
         pages = max(1, (total + limit - 1) // limit)
         items = SalesRepository.list_customers(
             db,
             page=page,
             limit=limit,
             include_deleted=include_deleted,
+            search=search,
         )
 
         tagged_store_ids = sorted({item.last_store_id for item in items if item.last_store_id is not None})
@@ -534,8 +554,10 @@ class SalesService:
         store_id: UUID,
         payload: BulkSaleCreateRequest,
         source: Literal["store", "website"] = SOURCE_STORE,
+        admin_id: int | None = None,
     ) -> dict:
         created_sales: list[Sale] = []
+        alterations: list[dict] = []
         total_amount = 0.0
         total_cost_price = 0.0
         total_profit = 0.0
@@ -550,9 +572,12 @@ class SalesService:
                 if not customer:
                     raise HTTPException(status_code=404, detail="Selected customer was not found")
 
-            line_items: list[tuple[BulkSaleItemRequest, float, float]] = []
+            if any(item.alteration for item in payload.items):
+                SalesService._check_alteration_allowed(customer, payload.items)
+
+            line_items: list[tuple[BulkSaleItemRequest, float, float, str]] = []
             for item in payload.items:
-                _, variant = SalesService._validate_sale_item(db, store_id=store_id, item=item)
+                product, variant = SalesService._validate_sale_item(db, store_id=store_id, item=item)
 
                 updated_stock = variant.stock_quantity - item.quantity
                 if updated_stock < 0:
@@ -566,17 +591,20 @@ class SalesService:
                     final_price=item.final_price,
                     item_weight=item.weight,
                 )
-                line_items.append((item, line_cost_price, line_profit))
+                line_items.append((item, line_cost_price, line_profit, product.name))
                 total_amount += float(item.final_price)
                 total_cost_price += line_cost_price
                 total_profit += line_profit
 
+            cgst, sgst = split_gst(round(total_amount, 2))
             order = Order(
                 store_id=store_id,
                 user_id=None,
                 email=None,
                 full_name=None,
+                # Ex-GST net (what Insights sum); collected = total_amount + tax_amount.
                 total_amount=round(total_amount, 2),
+                tax_amount=cgst + sgst,
                 status="COMPLETED",
                 source=source,
                 invoice_number=SalesService._generate_order_invoice_number(db, store_id, sale_time),
@@ -585,7 +613,7 @@ class SalesService:
             db.flush()
             order_id = order.id
 
-            for item, line_cost_price, line_profit in line_items:
+            for item, line_cost_price, line_profit, product_name in line_items:
                 sale = SalesService._build_sale_record(
                     store_id=store_id,
                     item=item,
@@ -596,17 +624,68 @@ class SalesService:
                     date_time=sale_time,
                     order_id=order_id,
                 )
+                if item.alteration:
+                    sale.alteration_note = f"{item.alteration.what}, ready by {item.alteration.ready_by:%d %b %Y}"
                 SalesRepository.create_sale(db, sale)
                 physical_unit_service.take_units(db, item.variant_id, item.quantity, unit_ids=item.unit_ids, sale=sale)
                 created_sales.append(sale)
 
+                if item.alteration:
+                    custom_order = AdminCustomOrderService.create_order(
+                        db,
+                        store_id=store_id,
+                        admin_id=admin_id,
+                        sale_order_id=order_id,
+                        payload=CustomOrderCreateRequest(
+                            customer_name=customer.full_name,
+                            customer_phone=customer.phone,
+                            design_notes=(
+                                f"Alteration — {product_name} (bill {order.invoice_number}): {item.alteration.what}"
+                            ),
+                            expected_date=item.alteration.ready_by,
+                        ),
+                    )
+                    alterations.append(
+                        {
+                            "custom_order_id": custom_order["id"],
+                            "product_name": product_name,
+                            "ready_by": item.alteration.ready_by,
+                        }
+                    )
+
         return {
             "created_sale_ids": [sale.id for sale in created_sales],
             "order_id": order_id,
+            "invoice_number": order.invoice_number,
             "total_amount": round(total_amount, 2),
+            "tax_amount": float(cgst + sgst),
+            "grand_total": float(Decimal(str(round(total_amount, 2))) + cgst + sgst),
+            "alterations": alterations,
             "total_cost_price": round(total_cost_price, 2),
             "total_profit": round(total_profit, 2),
         }
+
+    @staticmethod
+    def _check_alteration_allowed(customer: User | None, items: list[BulkSaleItemRequest]) -> None:
+        """Leaving a piece for alteration opens a Custom Order, which needs
+        someone to call when it's ready -- so no walk-in, and a real phone."""
+        if customer is None:
+            raise HTTPException(
+                status_code=422,
+                detail="To leave a piece for alteration, choose or add the customer (name and phone number). "
+                "Walk-in customer can't be used for alterations.",
+            )
+        try:
+            CustomOrderCreateRequest(customer_name=customer.full_name or "", customer_phone=customer.phone or "")
+        except ValidationError:
+            raise HTTPException(
+                status_code=422,
+                detail=f"{customer.full_name or 'This customer'} needs a valid 10-digit mobile number before a piece "
+                "can be left for alteration. Add or fix the phone number and try again.",
+            )
+        today = datetime.now(IST).date()
+        if any(item.alteration and item.alteration.ready_by < today for item in items):
+            raise HTTPException(status_code=422, detail="The 'Ready by' date for an alteration can't be in the past.")
 
     @staticmethod
     def get_sales_history(
@@ -768,33 +847,54 @@ class SalesService:
         pdf.drawString(40, y, "Sale Items")
         y -= 18
         pdf.setFont("Helvetica", 11)
-        grand_total = 0.0
+        net_total = 0.0
         subtotal = 0.0
         for sale in sales:
+            if y < 120:
+                pdf.showPage()
+                pdf.setFont("Helvetica", 11)
+                y = height - 40
             product_name = sale.product.name if sale.product else "Unknown Product"
             line_total = float(sale.final_price)
             line_price = max(line_total, float(sale.total_amount or line_total))
-            grand_total += line_total
+            net_total += line_total
             subtotal += line_price
-            pdf.drawString(40, y, f"{product_name} x{sale.quantity}")
+            pdf.drawString(40, y, f"{product_name} x{sale.quantity}   HSN {HSN_JEWELLERY}")
             pdf.drawRightString(width - 40, y, f"INR {line_price:,.2f}")
             y -= 16
             if line_price > line_total:
                 pdf.drawString(56, y, "Discount")
                 pdf.drawRightString(width - 40, y, f"- INR {line_price - line_total:,.2f}")
                 y -= 16
+            if sale.alteration_note:
+                pdf.drawString(56, y, f"Alteration: {sale.alteration_note}")
+                y -= 16
 
+        # Tax is read as stored at sale time, never recomputed. Bills from
+        # before GST was added (tax_amount 0) print exactly as they did.
+        tax = float(order.tax_amount or 0)
         y -= 12
-        if subtotal > grand_total:
+        if subtotal > net_total:
             pdf.drawString(40, y, "Subtotal")
             pdf.drawRightString(width - 40, y, f"INR {subtotal:,.2f}")
             y -= 16
             pdf.drawString(40, y, "Discount")
-            pdf.drawRightString(width - 40, y, f"- INR {subtotal - grand_total:,.2f}")
+            pdf.drawRightString(width - 40, y, f"- INR {subtotal - net_total:,.2f}")
+            y -= 18
+        if tax > 0:
+            pdf.drawString(40, y, "Taxable value")
+            pdf.drawRightString(width - 40, y, f"INR {net_total:,.2f}")
+            y -= 16
+            cgst = round(tax / 2, 2)
+            pdf.drawString(40, y, "CGST 1.5%")
+            pdf.drawRightString(width - 40, y, f"INR {cgst:,.2f}")
+            y -= 16
+            pdf.drawString(40, y, "SGST 1.5%")
+            pdf.drawRightString(width - 40, y, f"INR {tax - cgst:,.2f}")
             y -= 18
         pdf.setFont("Helvetica-Bold", 12)
         pdf.drawString(40, y, "Grand Total")
-        pdf.drawRightString(width - 40, y, f"INR {grand_total:,.2f}")
+        pdf.drawRightString(width - 40, y, f"INR {net_total + tax:,.2f}")
 
         pdf.showPage()
         pdf.save()

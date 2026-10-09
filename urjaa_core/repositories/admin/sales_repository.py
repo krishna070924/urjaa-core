@@ -2,7 +2,7 @@ from datetime import datetime
 import logging
 from uuid import UUID
 
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session, selectinload
 
 from urjaa_core.models.base_metal import BaseMetal
@@ -168,11 +168,19 @@ class SalesRepository:
         )
 
     @staticmethod
-    def count_customers(db: Session, include_deleted: bool = False) -> int:
-        query = db.query(func.count(User.id)).filter(User.source.in_(CUSTOMER_SOURCES))
+    def _customers_query(db: Session, include_deleted: bool, search: str | None):
+        query = db.query(User).filter(User.source.in_(CUSTOMER_SOURCES))
         if not include_deleted:
             query = query.filter(User.is_active.is_(True))
-        return int(query.scalar() or 0)
+        if search and search.strip():
+            # POS: staff look a customer up by name or phone number.
+            pattern = f"%{search.strip()}%"
+            query = query.filter(or_(User.full_name.ilike(pattern), User.phone.ilike(pattern)))
+        return query
+
+    @staticmethod
+    def count_customers(db: Session, include_deleted: bool = False, search: str | None = None) -> int:
+        return SalesRepository._customers_query(db, include_deleted, search).count()
 
     @staticmethod
     def list_customers(
@@ -180,12 +188,10 @@ class SalesRepository:
         page: int,
         limit: int,
         include_deleted: bool = False,
+        search: str | None = None,
     ) -> list[User]:
         offset = (page - 1) * limit
-        query = db.query(User).filter(User.source.in_(CUSTOMER_SOURCES))
-        if not include_deleted:
-            query = query.filter(User.is_active.is_(True))
-
+        query = SalesRepository._customers_query(db, include_deleted, search)
         return query.order_by(User.updated_at.desc(), User.id.desc()).offset(offset).limit(limit).all()
 
     @staticmethod
