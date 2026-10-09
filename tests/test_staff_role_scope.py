@@ -12,15 +12,19 @@ from urjaa_core.core.admin_auth import DEFAULT_ROLE_PERMISSIONS, _resolve_requir
 
 def allowed(role: str, path: str, method: str) -> bool:
     required = _resolve_required_permissions(path, method)
+    if required is not None and not required:
+        return True  # explicitly open to every signed-in admin
     return required is not None and bool(set(required) & DEFAULT_ROLE_PERMISSIONS[role])
 
 
 def main() -> None:
     for path, method in [("/admin/products", "POST"), ("/admin/sales/bulk", "POST"), ("/admin/custom-orders", "POST"),
-                         ("/admin/categories", "GET"), ("/admin/metal-rates", "GET")]:
+                         ("/admin/categories", "GET"), ("/admin/metal-rates", "GET"),
+                         ("/admin/stores/bootstrap", "GET"), ("/admin/stores", "GET")]:
         assert allowed("staff", path, method), (path, method)
     for path, method in [("/admin/categories", "POST"), ("/admin/metal-rates", "POST"), ("/admin/stones/1", "DELETE"),
-                         ("/admin/users", "GET"), ("/admin/cms/home", "PUT")]:
+                         ("/admin/users", "GET"), ("/admin/cms/home", "PUT"),
+                         ("/admin/stores", "POST"), ("/admin/stores/abc", "GET")]:
         assert not allowed("staff", path, method), (path, method)
         assert allowed("super_admin", path, method), (path, method)
     assert allowed("manager", "/admin/metal-rates", "POST") and allowed("admin", "/admin/categories", "POST")

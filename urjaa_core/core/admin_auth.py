@@ -328,6 +328,14 @@ ADMIN_ROUTE_PERMISSION_RULES: list[dict[str, Any]] = [
         "any_of": {ADMIN_PERMISSION_MANAGE_INVENTORY, ADMIN_PERMISSION_MANAGE_PRODUCTS},
     },
     {
+        # Review 9: every signed-in admin needs the store list (id + name only)
+        # to pick a store context -- staff without manage_stores got a 403 on
+        # login. Empty set = any authenticated admin. Must precede the rule below.
+        "pattern": re.compile(r"^/admin/stores(?:/bootstrap)?$"),
+        "methods": {"GET"},
+        "any_of": set(),
+    },
+    {
         "pattern": re.compile(r"^/admin/stores(?:/.*)?$"),
         "methods": {"GET"},
         "any_of": {ADMIN_PERMISSION_MANAGE_STORES},
