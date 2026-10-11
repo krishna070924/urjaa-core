@@ -6,6 +6,8 @@ Covers: category_id and subcategory_id filters on AdminManagementService
 .get_products narrow to the right products, collection_id filters via the
 product_collections bridge, a soft-deleted product is excluded from every
 filtered view, and pagination totals/pages stay correct under a filter.
+Also: metal_id / stone_id / status / in_stock, ANDed, on both the store
+list and the cross-store get_products_global.
 
 Run: .venv/bin/python tests/test_admin_product_filters.py
 """
@@ -19,18 +21,20 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from urjaa_core.core.database import engine
-from urjaa_core.models import Category, Collection, Product, ProductCollection, Store, Subcategory
+from urjaa_core.models import (
+    Category, Collection, Metal, Product, ProductCollection, ProductStone, ProductVariant, Stone, Store, Subcategory,
+)
 from urjaa_core.services.admin.admin_management_service import AdminManagementService as svc
 
 
-def _make_product(db, store, subcategory, *, name, collection=None, deleted=False):
+def _make_product(db, store, subcategory, *, name, collection=None, deleted=False, status="active"):
     product = Product(
         id=uuid4(),
         store_id=store.id,
         name=name,
         slug=f"{name.lower().replace(' ', '-')}-{uuid4().hex[:8]}",
         subcategory_id=subcategory.id,
-        status="active",
+        status=status,
         deleted_at=datetime.now(timezone.utc) if deleted else None,
     )
     db.add(product)
@@ -110,6 +114,43 @@ def main() -> None:
         assert len(page1_items) == 1 and len(page2_items) == 1, (page1_items, page2_items)
         assert {page1_items[0].id, page2_items[0].id} == {p1.id, p2.id}
         print("OK pagination total/pages stay correct under a category filter (2 total, 1/page -> 2 pages, no overlap)")
+
+        # --- metal / stone / status / stock (p1: metal+stone, stock 3; p2: draft, other metal, stock 0; p3: no variants)
+        metal, other_metal = db.query(Metal).order_by(Metal.id).limit(2).all()
+        stone = db.query(Stone).first()
+        p2.status = "draft"
+        db.add_all([
+            ProductVariant(store_id=store.id, product_id=p1.id, metal_id=metal.id, stock_quantity=3, sku_code=f"K08-{uuid4().hex[:10]}"),
+            ProductVariant(store_id=store.id, product_id=p2.id, metal_id=other_metal.id, stock_quantity=0, sku_code=f"K08-{uuid4().hex[:10]}"),
+            ProductStone(product_id=p1.id, stone_id=stone.id),
+        ])
+        db.flush()
+
+        def ids(**f):
+            items, total = svc.get_products(db, store_id=store.id, page=1, limit=20, **f)
+            assert total == len(items), (total, items)
+            return {p.id for p in items}
+
+        assert ids(metal_id=metal.id) == {p1.id}
+        assert ids(stone_id=stone.id) == {p1.id}
+        assert ids(status="draft") == {p2.id}
+        assert ids(in_stock=True) == {p1.id}
+        assert ids(in_stock=False) == {p2.id, p3.id}
+        assert ids(category_id=cat_a.id, in_stock=False) == {p2.id}
+        assert ids(collection_id=coll_x.id, status="active", in_stock=True, metal_id=metal.id) == {p1.id}
+        assert ids(search="K08 P3", in_stock=True) == set()
+        print("OK metal_id / stone_id / status / in_stock filter and AND together")
+
+        def global_ids(**f):
+            items, total = svc.get_products_global(db, page=1, limit=1000, **f)
+            assert total == len(items), (total, items)
+            return {e["product"].id for e in items}
+
+        assert global_ids(category_id=cat_a.id) == {p1.id, p2.id}
+        assert global_ids(category_id=cat_a.id, in_stock=True) == {p1.id}
+        assert global_ids(collection_id=coll_x.id, stone_id=stone.id) == {p1.id}
+        assert global_ids(subcategory_id=sub_b1.id, in_stock=False) == {p3.id}
+        print("OK get_products_global applies the same filters")
 
         print("\nAll K-08 admin product filter checks passed.")
     finally:
