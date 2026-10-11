@@ -12,7 +12,7 @@ third-party hosts out of admin-authored, publicly-rendered content.
 from typing import Annotated, Literal
 from uuid import UUID
 
-from pydantic import AfterValidator, BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import AfterValidator, AwareDatetime, BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from urjaa_core.core.config import settings
 
@@ -574,3 +574,54 @@ class FooterContent(BaseModel):
     newsletter_heading: str | None = _text(60)
     newsletter_text: str | None = _text(200)
     copyright: str | None = _text(120)
+
+
+# =============================================================================
+# Offer popup (one CMS-managed popup; see popups-plan.md)
+# =============================================================================
+
+# The storefront shows these verbatim and the subscribe endpoint stores
+# whichever the person agreed to (DPDP proof of consent) -- the client never
+# sends consent text.
+DEFAULT_POPUP_CONSENT_TEXT = (
+    "I agree to receive offers, previews and news from Urjaa Ornaments by email. I can unsubscribe at any time."
+)
+WHATSAPP_CONSENT_TEXT = "Send me offers on WhatsApp from Urjaa Ornaments."
+FOOTER_CONSENT_TEXT = "By subscribing you agree to receive emails from Urjaa Ornaments. See our Privacy Policy."
+
+
+class PopupContent(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = False
+    image_url: MediaUrl = None
+    image_alt: str | None = Field(default=None, max_length=120)
+    title: str | None = Field(default=None, max_length=60)
+    body: str | None = Field(default=None, max_length=200)
+    cta_label: str | None = Field(default=None, max_length=30)
+    # Named `link` (not cta_link) so it is shaped like an OfferSlot and
+    # resolves through the same code as the Home offer banners.
+    link: OfferLink | None = None
+    starts_at: AwareDatetime | None = None
+    ends_at: AwareDatetime | None = None
+    pages: Annotated[
+        list[Literal["home", "listing", "product", "content"]], Field(min_length=1), AfterValidator(_no_duplicates)
+    ] = Field(default_factory=lambda: ["home", "listing", "product"])
+    delay_seconds: int = Field(default=8, ge=3, le=60)
+    hide_for_days: int = Field(default=7, ge=1, le=90)
+    show_to_signed_in: bool = False
+    capture: Literal["none", "email", "email_whatsapp"] = "email"
+    consent_text: str = Field(default=DEFAULT_POPUP_CONSENT_TEXT, min_length=10, max_length=300)
+
+    @model_validator(mode="after")
+    def _consistent(self):
+        if self.starts_at and self.ends_at and self.ends_at <= self.starts_at:
+            raise ValueError("End must be after start")
+        if self.image_url and not (self.image_alt or "").strip():
+            raise ValueError("Describe the image (alt text) for screen readers")
+        if self.enabled:
+            if not self.image_url and not (self.title or "").strip():
+                raise ValueError("Add a title or an image")
+            if self.capture == "none" and (self.link is None or not (self.cta_label or "").strip()):
+                raise ValueError("Without a sign-up form the popup needs a button: add its label and where it opens")
+        return self

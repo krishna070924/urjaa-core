@@ -13,6 +13,7 @@ the table already exists and both app DB roles already have full DML on it):
       ]
     }
 """
+import hashlib
 from datetime import datetime, timezone
 from typing import Any
 from uuid import UUID
@@ -30,7 +31,18 @@ from urjaa_core.models.subcategory import Subcategory
 from urjaa_core.models.tag import Tag
 from urjaa_core.models.website_config import WebsiteConfig
 from urjaa_core.repositories.product_repository import ProductRepository
-from urjaa_core.schemas.cms_content import HERO_PAGES, POLICY_KEYS, ContactContent, FaqContent, FooterContent, HomePageContent, OurStoryContent, PoliciesContent
+from urjaa_core.schemas.cms_content import (
+    HERO_PAGES,
+    POLICY_KEYS,
+    WHATSAPP_CONSENT_TEXT,
+    ContactContent,
+    FaqContent,
+    FooterContent,
+    HomePageContent,
+    OurStoryContent,
+    PoliciesContent,
+    PopupContent,
+)
 from urjaa_core.schemas.product import ProductResponse
 from urjaa_core.services.pricing_service import PricingService
 from urjaa_core.utils.currency import format_price_or_request
@@ -47,6 +59,7 @@ PAGE_MODELS: dict[str, type[BaseModel]] = {
     "faq": FaqContent,
     "contact": ContactContent,
     "footer": FooterContent,
+    "popup": PopupContent,
 }
 
 PAGE_STORAGE_KEYS: dict[str, str] = {
@@ -56,6 +69,7 @@ PAGE_STORAGE_KEYS: dict[str, str] = {
     "faq": "cms.faq",
     "contact": "cms.contact",
     "footer": "cms.footer",
+    "popup": "cms.popup",
 }
 
 _EMPTY_HOME_RESOLVED: dict[str, Any] = {
@@ -550,3 +564,31 @@ def resolve_plain_page_for_storefront(db: Session, page: str) -> dict[str, Any]:
     storefront then shows its designed copy)."""
     current, _ = get_page(db, page)
     return current if isinstance(current, dict) else {}
+
+
+def resolve_popup_for_storefront(db: Session, now: datetime | None = None) -> dict[str, Any]:
+    """{} unless the popup is on and inside its date window, so scheduled
+    campaigns never leak and the client needs no date check. The link
+    resolves like a Home offer banner (None if its target is gone)."""
+    current, _ = get_page(db, "popup")
+    if not isinstance(current, dict):
+        return {}
+    content = PopupContent.model_validate(current)
+    now = now or datetime.now(timezone.utc)
+    if not content.enabled or (content.starts_at and now < content.starts_at) or (content.ends_at and now >= content.ends_at):
+        return {}
+
+    link = content.link
+    categories_by_id = _resolve_categories(db, [link.id] if link and link.kind == "category" else [])
+    collections_by_id = _resolve_collections(db, [link.id] if link and link.kind == "collection" else [])
+    resolved_link = _resolve_offer_slots(db, [content], categories_by_id, collections_by_id)[0]["link"]
+    if content.capture == "none" and resolved_link is None:
+        return {}  # a link-only popup whose target was deleted has nothing to offer
+
+    data = content.model_dump(mode="json", exclude={"enabled", "starts_at", "ends_at", "link"})
+    # Dismissals are remembered per key: a new offer shows again, a typo fix doesn't.
+    key_source = f"{content.title}|{content.image_url}|{current.get('starts_at')}"
+    data["key"] = hashlib.sha256(key_source.encode()).hexdigest()[:16]
+    data["link"] = resolved_link
+    data["whatsapp_consent_text"] = WHATSAPP_CONSENT_TEXT
+    return data

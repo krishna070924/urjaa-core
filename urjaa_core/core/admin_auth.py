@@ -84,7 +84,7 @@ ADMIN_PERMISSION_DESCRIPTIONS: dict[str, str] = {
     ADMIN_PERMISSION_VIEW_ORDERS: "View website orders",
     ADMIN_PERMISSION_MANAGE_WEBSITE: "Manage website CMS and website module",
     ADMIN_PERMISSION_MANAGE_CMS: "Manage website CMS and legal/SEO content",
-    ADMIN_PERMISSION_VIEW_REPORTS: "View reports and newsletter exports",
+    ADMIN_PERMISSION_VIEW_REPORTS: "View reports",
     ADMIN_PERMISSION_VIEW_ANALYTICS: "View analytics and CRM data",
     ADMIN_PERMISSION_MANAGE_TICKETS: "Manage support tickets (reply, assign, resolve)",
     ADMIN_PERMISSION_VIEW_TICKETS: "View support tickets (read-only)",
@@ -515,9 +515,12 @@ ADMIN_ROUTE_PERMISSION_RULES: list[dict[str, Any]] = [
         "any_of": {ADMIN_PERMISSION_MANAGE_SALES},
     },
     {
+        # Offer popups: leads now carry phone numbers, so the Website →
+        # Subscribers list/CSV sits with the popup that collects them
+        # (manage_website), not the broad view_reports bucket.
         "pattern": re.compile(r"^/admin/newsletter(?:/.*)?$"),
         "methods": None,
-        "any_of": {ADMIN_PERMISSION_VIEW_REPORTS},
+        "any_of": {ADMIN_PERMISSION_MANAGE_WEBSITE},
     },
     {
         "pattern": re.compile(r"^/admin/search(?:/.*)?$"),
