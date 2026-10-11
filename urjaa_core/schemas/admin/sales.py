@@ -145,6 +145,7 @@ class SaleResponse(BaseModel):
     total_amount: Decimal
     final_price: Decimal
     discount_amount: Decimal = Decimal("0")
+    gst_amount: Decimal = Decimal("0")  # this line's share of the bill's stored GST
     cost_price: Decimal
     profit: Decimal
     source: Literal["store", "website"]

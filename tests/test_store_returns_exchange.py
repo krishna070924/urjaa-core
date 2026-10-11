@@ -29,7 +29,7 @@ from urjaa_core.models.metal_rate import MetalRate  # noqa: E402
 from urjaa_core.models.order import Order  # noqa: E402
 from urjaa_core.models.product import Product  # noqa: E402
 from urjaa_core.models.product_variant import ProductVariant  # noqa: E402
-from urjaa_core.models.sale import NET_SALE_AMOUNT, Sale  # noqa: E402
+from urjaa_core.models.sale import NET_SALE_AMOUNT, NET_SALE_PROFIT, Sale  # noqa: E402
 from urjaa_core.models.user import User  # noqa: E402
 from urjaa_core.models.variant_physical_unit import UnitStatus, VariantPhysicalUnit  # noqa: E402
 from urjaa_core.schemas.admin.sales import (  # noqa: E402
@@ -41,6 +41,7 @@ from urjaa_core.schemas.admin.sales import (  # noqa: E402
     SaleReturnCreateRequest,
     SaleReturnLineRequest,
 )
+from urjaa_core.services import analytics_service  # noqa: E402
 from urjaa_core.services.admin import store_return_service  # noqa: E402
 from urjaa_core.services.admin.sales_service import SalesService  # noqa: E402
 
@@ -199,6 +200,20 @@ def main() -> None:
         history = SalesService.get_sales_history(db, store.id, page=1, limit=50, customer_id=customer.id)
         row = next(item for item in history["items"] if item["id"] == count_line.id)
         assert row["returned_quantity"] == 1 and row["credit_notes"][0]["credit_note_number"] == done["credit_note_number"]
+        assert row["gst_amount"] == 600.0, row  # 1,740 stored GST x 20,000 / 58,000
+        # Profit nets too: half the 2-piece line came back (its cost back in stock)
+        # -> half its profit; the fully returned alteration line -> 0.
+        net_profit = dict(db.query(Sale.id, NET_SALE_PROFIT).filter(Sale.order_id == order.id))
+        assert abs(net_profit[count_line.id] - count_line.profit / 2) < Decimal("0.01"), net_profit
+        assert abs(net_profit[alt_line.id]) < Decimal("0.01"), net_profit
+        # RFM spend nets returns (store bills carry no user_id, so link this one to test it).
+        order.user_id = customer.id
+        db.flush()
+        analytics_service.clear_cache()
+        assert analytics_service.compute_rfm_scores(store.id, db)[customer.id].total_spend == 58000 - 33000
+        analytics_service.clear_cache()
+        order.user_id = None
+        db.flush()
 
         # ── C. Store credit: use it on the next bill (= exchange), never below zero ──
         new_item = [BulkSaleItemRequest(product_id=product.id, variant_id=counted.id, quantity=1, final_price=40000)]
@@ -245,7 +260,7 @@ def main() -> None:
                              ("/admin/sales/returns/7/credit-note", "GET")]:
             assert set(_resolve_required_permissions(path, method)) & DEFAULT_ROLE_PERMISSIONS["staff"], path
 
-        print("OK: old-gold + split bill, returns (count + HUID) with credit note, store credit use/payout, walk-in guard, Insights net")
+        print("OK: old-gold + split bill, returns (count + HUID) with credit note, store credit use/payout, walk-in guard, Insights net (revenue, profit, RFM), history GST")
     finally:
         db.close()
         outer.rollback()

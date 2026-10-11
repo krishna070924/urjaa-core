@@ -22,7 +22,7 @@ from urjaa_core.models.product_variant import ProductVariant
 from urjaa_core.models.stone import Stone
 from urjaa_core.models.subcategory import Subcategory
 from urjaa_core.models.tag import Tag
-from urjaa_core.models.sale import NET_SALE_AMOUNT, NET_SALE_QUANTITY, Sale
+from urjaa_core.models.sale import NET_SALE_AMOUNT, NET_SALE_PROFIT, NET_SALE_QUANTITY, Sale
 
 
 class AdminManagementRepository:
@@ -162,12 +162,6 @@ class AdminManagementRepository:
 
     @staticmethod
     def get_sales_insights(db: Session, store_id: UUID, top_limit: int = 5) -> dict:
-        profit_expr = func.coalesce(
-            Sale.profit,
-            Sale.final_price - func.coalesce(Sale.cost_price, 0),
-            0,
-        )
-
         totals = (
             db.query(
                 func.coalesce(func.sum(NET_SALE_AMOUNT), 0).label("total_revenue"),
@@ -179,7 +173,7 @@ class AdminManagementRepository:
                     func.sum(case((Sale.source == "website", NET_SALE_AMOUNT), else_=0)),
                     0,
                 ).label("website_revenue"),
-                func.coalesce(func.sum(profit_expr), 0).label("total_profit"),
+                func.coalesce(func.sum(NET_SALE_PROFIT), 0).label("total_profit"),
                 func.count(Sale.id).label("total_sales_count"),
             )
             .filter(Sale.store_id == store_id)
@@ -247,16 +241,7 @@ class AdminManagementRepository:
                     func.sum(case((Sale.source == "website", NET_SALE_AMOUNT), else_=0)),
                     0,
                 ).label("website"),
-                func.coalesce(
-                    func.sum(
-                        func.coalesce(
-                            Sale.profit,
-                            Sale.final_price - func.coalesce(Sale.cost_price, 0),
-                            0,
-                        )
-                    ),
-                    0,
-                ).label("profit"),
+                func.coalesce(func.sum(NET_SALE_PROFIT), 0).label("profit"),
             )
             .filter(
                 Sale.store_id == store_id,

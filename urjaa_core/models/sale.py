@@ -50,3 +50,6 @@ REVENUE_SALE_STATUSES = ("COMPLETED", "PROCESSING", "SHIPPED", "DELIVERED")
 # returned since (store returns). Website lines never have returns -> unchanged.
 NET_SALE_AMOUNT = Sale.final_price - Sale.returned_amount
 NET_SALE_QUANTITY = Sale.quantity - Sale.returned_quantity
+# Profit after returns: the returned value comes off, and the returned pieces'
+# cost comes back (they go back into stock).
+NET_SALE_PROFIT = Sale.profit - Sale.returned_amount + Sale.cost_price * Sale.returned_quantity / Sale.quantity
