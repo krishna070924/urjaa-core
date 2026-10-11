@@ -193,6 +193,9 @@ class AdminManagementService:
             key=lambda item: (
                 item["product"].updated_at or item["product"].created_at,
                 item["product"].created_at,
+                # Tie-break: a bulk upload gives many products the same
+                # timestamps; without it pages overlapped/shuffled (review 10).
+                str(item["product"].id),
             ),
             reverse=True,
         )
