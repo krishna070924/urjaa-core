@@ -28,6 +28,8 @@ class CustomerCreateRequest(BaseModel):
     email: str | None = Field(default=None, max_length=150)
     address: str | None = None
     feedback: str | None = None
+    # Staff confirmed: a different person who shares a saved customer's mobile number.
+    allow_shared_phone: bool = False
 
 
 class CustomerUpdateRequest(BaseModel):
@@ -49,6 +51,10 @@ class CustomerResponse(BaseModel):
     address: str | None = None
     feedback: str | None = None
     store_credit_balance: float = 0
+    # Bills linked to this customer (orders.user_id): count, ex-GST spend after returns, latest.
+    bills_count: int = 0
+    net_spend: float = 0
+    last_bill_at: datetime | None = None
     source: Literal["WEBSITE", "STORE", "ADMIN"]
     is_deleted: bool = False
     created_at: datetime | None = None
@@ -180,6 +186,14 @@ class BulkSaleResponse(BaseModel):
     amount_to_pay: float = 0
     payable_to_customer: float = 0
     payout_method: str | None = None
+
+
+class StoreCreditAdjustRequest(BaseModel):
+    """Manual store credit: issue (+) or deduct/correct (-), always with a reason."""
+
+    direction: Literal["issue", "deduct"]
+    amount: Decimal = Field(gt=0, max_digits=12, decimal_places=2)
+    reason: Annotated[str, StringConstraints(strip_whitespace=True, min_length=3, max_length=500)]
 
 
 class SaleReturnLineRequest(BaseModel):

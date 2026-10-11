@@ -1,4 +1,5 @@
 import csv
+import re
 from contextlib import contextmanager
 from datetime import datetime, timezone; UTC = timezone.utc
 from decimal import ROUND_HALF_UP, Decimal
@@ -19,16 +20,17 @@ from urjaa_core.core.user_auth import (
     hash_user_password,
     normalize_user_email,
 )
+from urjaa_core.models.admin_user import AdminUser
 from urjaa_core.models.base_metal import BaseMetal
 from urjaa_core.models.order import Order
-from urjaa_core.models.sale import Sale
+from urjaa_core.models.sale import ORDER_NET_AMOUNT, Sale
 from urjaa_core.models.store import Store
 from urjaa_core.models.store_return import OldGoldItem, SaleReturn, SaleReturnLine, StoreCreditEntry
 from urjaa_core.models.user import User
-from urjaa_core.repositories.admin.sales_repository import SalesRepository
+from urjaa_core.repositories.admin.sales_repository import CUSTOMER_SOURCES, SalesRepository
 from urjaa_core.services import physical_unit_service
 from urjaa_core.services.admin.custom_order_service import AdminCustomOrderService
-from urjaa_core.schemas.admin.custom_orders import CustomOrderCreateRequest
+from urjaa_core.schemas.admin.custom_orders import CustomOrderCreateRequest, _normalize_indian_mobile
 from urjaa_core.schemas.admin.sales import (
     BulkSaleCreateRequest,
     BulkSaleItemRequest,
@@ -37,6 +39,7 @@ from urjaa_core.schemas.admin.sales import (
     OldGoldItemRequest,
     SaleCreateRequest,
     SalePaymentRequest,
+    StoreCreditAdjustRequest,
 )
 
 
@@ -57,6 +60,22 @@ def ist_text(value: datetime) -> str:
 
 def money(value) -> Decimal:
     return Decimal(str(value)).quantize(PAISE, ROUND_HALF_UP)
+
+
+def phone_key(phone: str | None) -> str | None:
+    """Who a phone number belongs to: its last 10 digits, so 98765 43210,
+    +91-9876543210 and 09876543210 are one number (+91 is the default)."""
+    digits = re.sub(r"\D", "", phone or "")
+    return digits[-10:] if len(digits) >= 10 else None
+
+
+# ponytail: last-10-digits match, no index; add a functional index if customers reach 100k+.
+USER_PHONE_KEY = func.right(func.regexp_replace(User.phone, r"\D", "", "g"), 10)
+PLACEHOLDER_EMAIL_DOMAIN = "@store.local"  # store customers saved without an email
+
+
+def same_name(a: str | None, b: str | None) -> bool:
+    return " ".join((a or "").split()).casefold() == " ".join((b or "").split()).casefold()
 
 
 def split_gst(net_amount: float) -> tuple[Decimal, Decimal]:
@@ -81,6 +100,16 @@ class SalesService:
             .filter(StoreCreditEntry.customer_id == customer_id)
             .scalar()
         )
+
+    @staticmethod
+    def link_order_to_customer(order: Order, customer: User) -> None:
+        """A store bill belongs to its customer: orders.user_id is what customer
+        analytics (RFM, at-risk, profile) count. Name/phone are a snapshot as billed."""
+        order.user_id = customer.id
+        order.full_name = customer.full_name
+        order.phone = customer.phone
+        email = customer.email or ""
+        order.email = None if email.endswith(PLACEHOLDER_EMAIL_DOMAIN) else email
 
     @staticmethod
     def require_named_customer(customer: User | None, what: str) -> None:
@@ -171,9 +200,14 @@ class SalesService:
         return " · ".join(parts) or "—"
 
     @staticmethod
-    def _to_customer_response(user: User, store_name: str | None = None, store_credit_balance: Decimal | float = 0) -> dict:
+    def _to_customer_response(
+        user: User, store_name: str | None = None, store_credit_balance: Decimal | float = 0, stats=None
+    ) -> dict:
         return {
             "store_credit_balance": float(store_credit_balance),
+            "bills_count": int(stats.bills) if stats else 0,
+            "net_spend": float(stats.net_spend or 0) if stats else 0.0,
+            "last_bill_at": stats.last_bill_at if stats else None,
             "id": user.id,
             "name": user.full_name,
             "store_id": user.last_store_id,
@@ -490,11 +524,13 @@ class SalesService:
             .group_by(StoreCreditEntry.customer_id)
             .all()
         ) if items else {}
+        stats_by_customer = SalesService._bill_stats(db, [item.id for item in items])
 
         return {
             "items": [
                 SalesService._to_customer_response(
-                    item, store_name_by_id.get(item.last_store_id), balance_by_customer.get(item.id, 0)
+                    item, store_name_by_id.get(item.last_store_id), balance_by_customer.get(item.id, 0),
+                    stats_by_customer.get(item.id),
                 )
                 for item in items
             ],
@@ -505,10 +541,80 @@ class SalesService:
         }
 
     @staticmethod
+    def _bill_stats(db: Session, customer_ids: list[UUID]) -> dict:
+        """Bills (store + website), net spend (ex-GST, after returns), last bill -- per customer."""
+        if not customer_ids:
+            return {}
+        rows = (
+            db.query(
+                Order.user_id,
+                func.count(Order.id).label("bills"),
+                func.sum(ORDER_NET_AMOUNT).label("net_spend"),
+                func.max(Order.created_at).label("last_bill_at"),
+            )
+            .filter(Order.user_id.in_(customer_ids), Order.status != "CANCELLED")
+            .group_by(Order.user_id)
+            .all()
+        )
+        return {row.user_id: row for row in rows}
+
+    @staticmethod
+    def _find_existing_customer(db: Session, phone: str | None, email: str | None) -> tuple[User | None, str]:
+        """Same person already saved? Phone first (normalised), then a real email."""
+        key = phone_key(phone)
+        if key:
+            match = (
+                db.query(User)
+                .filter(User.source.in_(CUSTOMER_SOURCES), User.is_active.is_(True), USER_PHONE_KEY == key)
+                .order_by(User.created_at)
+                .first()
+            )
+            if match is not None:
+                return match, "phone"
+        if email:
+            match = db.query(User).filter(func.lower(User.email) == email).first()
+            if match is not None:
+                return match, "email"
+        return None, ""
+
+    @staticmethod
     def create_customer(db: Session, store_id: UUID | None, payload: CustomerCreateRequest) -> dict:
         normalized_name = payload.name.strip()
         if not normalized_name:
             raise HTTPException(status_code=400, detail="Customer name is required")
+        phone = payload.phone.strip() if payload.phone and payload.phone.strip() else None
+        if phone:
+            try:
+                phone = _normalize_indian_mobile(phone)
+            except ValueError:
+                pass  # not an Indian mobile (landline / foreign): keep as typed
+
+        # Never a second record for the same person: same phone (or email) and
+        # same name -> reuse it. Same phone, different name -> ask staff; a family
+        # sharing one number is saved separately only when they say so.
+        email = normalize_user_email(payload.email) if payload.email and payload.email.strip() else None
+        existing, matched_on = SalesService._find_existing_customer(db, phone, email)
+        if existing is not None and existing.is_active and same_name(existing.full_name, normalized_name):
+            return SalesService._to_customer_response(
+                existing,
+                db.query(Store.name).filter(Store.id == existing.last_store_id).scalar() if existing.last_store_id else None,
+                SalesService.store_credit_balance(db, existing.id),
+            )
+        if matched_on == "email":
+            raise HTTPException(
+                status_code=409,
+                detail=f"This email is already saved for {existing.full_name}. Search for them and choose them, "
+                "or leave the email empty.",
+            )
+        if matched_on == "phone" and not payload.allow_shared_phone:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Mobile number {existing.phone} is already saved for {existing.full_name}. Search for it and "
+                "choose them -- or, if this is a different person using the same number, tick “Different person, "
+                "same number” and save again.",
+            )
+        if email and db.query(User.id).filter(func.lower(User.email) == email).first():
+            raise HTTPException(status_code=409, detail="This email is already saved for another customer.")
 
         resolved_store_tag = SalesService._resolve_customer_store_tag(
             db,
@@ -516,24 +622,11 @@ class SalesService:
             active_store_id=store_id,
         )
 
-        normalized_email: str
-        if payload.email and payload.email.strip():
-            normalized_email = normalize_user_email(payload.email)
-            existing = (
-                db.query(User)
-                .filter(func.lower(User.email) == normalized_email)
-                .first()
-            )
-            if existing is not None:
-                raise HTTPException(status_code=409, detail="Customer with this email already exists")
-        else:
-            normalized_email = SalesService._generate_store_customer_email(db)
-
         customer = User(
-            email=normalized_email,
+            email=email or SalesService._generate_store_customer_email(db),
             password_hash=hash_user_password(secrets.token_urlsafe(48)),
             full_name=normalized_name,
-            phone=payload.phone.strip() if payload.phone else None,
+            phone=phone,
             last_store_id=resolved_store_tag,
             source=USER_SOURCE_STORE,
             address=payload.address.strip() if payload.address else None,
@@ -620,6 +713,115 @@ class SalesService:
         SalesRepository.update_customer(db, customer)
         db.commit()
         return {"message": "Customer archived successfully"}
+
+    @staticmethod
+    def get_customer_account(db: Session, customer_id: UUID) -> dict:
+        """Store credit page: the customer, their bills and their full credit ledger."""
+        customer = SalesRepository.get_customer_by_id(db, customer_id, include_deleted=True)
+        if not customer:
+            raise HTTPException(status_code=404, detail="Customer not found")
+        store_names = dict(db.query(Store.id, Store.name).all())
+
+        # ponytail: newest 200 bills; page it if a customer ever has more.
+        orders = (
+            db.query(Order, ORDER_NET_AMOUNT.label("net_amount"))
+            .filter(Order.user_id == customer.id)
+            .order_by(Order.created_at.desc())
+            .limit(200)
+            .all()
+        )
+        returns_by_order: dict[UUID, list[dict]] = {}
+        for r in db.query(SaleReturn).filter(SaleReturn.order_id.in_([o.id for o, _ in orders])).order_by(SaleReturn.id):
+            returns_by_order.setdefault(r.order_id, []).append(
+                {"id": r.id, "credit_note_number": r.credit_note_number, "refund_amount": float(r.refund_amount)}
+            )
+        bills = [
+            {
+                "order_id": order.id,
+                "invoice_number": order.invoice_number,
+                "source": order.source,
+                "status": order.status,
+                "created_at": order.created_at,
+                "store_id": order.store_id,
+                "store_name": store_names.get(order.store_id),
+                "bill_total": float(money(order.total_amount) + money(order.tax_amount or 0)),
+                "net_amount": float(net_amount),
+                "returns": returns_by_order.get(order.id, []),
+            }
+            for order, net_amount in orders
+        ]
+
+        entries = (
+            db.query(StoreCreditEntry, SaleReturn.credit_note_number, Order.invoice_number, AdminUser.email)
+            .outerjoin(SaleReturn, SaleReturn.id == StoreCreditEntry.sale_return_id)
+            .outerjoin(Order, Order.id == func.coalesce(StoreCreditEntry.order_id, SaleReturn.order_id))
+            .outerjoin(AdminUser, AdminUser.id == StoreCreditEntry.created_by_admin_id)
+            .filter(StoreCreditEntry.customer_id == customer.id)
+            .order_by(StoreCreditEntry.created_at, StoreCreditEntry.id)
+            .all()
+        )
+        ledger, balance = [], Decimal(0)
+        for entry, credit_note, invoice, staff in entries:
+            balance += entry.amount
+            if entry.sale_return_id:
+                kind = "return_credit"
+            elif entry.order_id:
+                kind = "redeemed" if entry.amount < 0 else "old_gold_balance"
+            else:
+                kind = "manual_issue" if entry.amount > 0 else "manual_deduction"
+            ledger.append(
+                {
+                    "id": entry.id,
+                    "created_at": entry.created_at,
+                    "store_name": store_names.get(entry.store_id),
+                    "kind": kind,
+                    "amount": float(entry.amount),
+                    "balance_after": float(balance),
+                    "credit_note_number": credit_note,
+                    "invoice_number": invoice,
+                    "staff": staff,
+                    "note": entry.note,
+                }
+            )
+        ledger.reverse()  # newest first
+
+        stats = SalesService._bill_stats(db, [customer.id]).get(customer.id)
+        return {
+            "customer": SalesService._to_customer_response(
+                customer, store_names.get(customer.last_store_id), balance, stats
+            ),
+            "bills": bills,
+            "ledger": ledger,
+        }
+
+    @staticmethod
+    def adjust_store_credit(
+        db: Session, store_id: UUID, customer_id: UUID, payload: StoreCreditAdjustRequest, admin_id: int
+    ) -> dict:
+        """Manual credit or deduction -- always a new ledger row, never an edit.
+        The balance can't go below zero."""
+        with SalesService._transaction_scope(db):
+            customer = SalesRepository.get_customer_by_id(db, customer_id)
+            if not customer:
+                raise HTTPException(status_code=404, detail="Customer not found")
+            balance = SalesService.store_credit_balance(db, customer.id, lock=True)
+            amount = money(payload.amount)
+            if payload.direction == "deduct":
+                if amount > balance:
+                    raise HTTPException(
+                        status_code=422,
+                        detail=f"{customer.full_name} has only ₹{balance:,.2f} store credit -- "
+                        "a deduction can't take it below zero.",
+                    )
+                amount = -amount
+            db.add(
+                StoreCreditEntry(
+                    customer_id=customer.id, store_id=store_id, amount=amount,
+                    note=payload.reason, created_by_admin_id=admin_id,
+                )
+            )
+            db.flush()
+        return {"store_credit_balance": float(balance + amount)}
 
     @staticmethod
     def create_sale(
@@ -785,6 +987,8 @@ class SalesService:
                 payment_method=payment_method,
                 payment_details=payment_details or None,
             )
+            if customer is not None:
+                SalesService.link_order_to_customer(order, customer)
             db.add(order)
             db.flush()
             order_id = order.id

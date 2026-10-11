@@ -206,14 +206,11 @@ def main() -> None:
         net_profit = dict(db.query(Sale.id, NET_SALE_PROFIT).filter(Sale.order_id == order.id))
         assert abs(net_profit[count_line.id] - count_line.profit / 2) < Decimal("0.01"), net_profit
         assert abs(net_profit[alt_line.id]) < Decimal("0.01"), net_profit
-        # RFM spend nets returns (store bills carry no user_id, so link this one to test it).
-        order.user_id = customer.id
-        db.flush()
+        # RFM spend nets returns (the store bill is linked to its customer via orders.user_id).
+        assert order.user_id == customer.id
         analytics_service.clear_cache()
         assert analytics_service.compute_rfm_scores(store.id, db)[customer.id].total_spend == 58000 - 33000
         analytics_service.clear_cache()
-        order.user_id = None
-        db.flush()
 
         # ── C. Store credit: use it on the next bill (= exchange), never below zero ──
         new_item = [BulkSaleItemRequest(product_id=product.id, variant_id=counted.id, quantity=1, final_price=40000)]

@@ -1,5 +1,6 @@
 from datetime import datetime
 import logging
+import re
 from uuid import UUID
 
 from sqlalchemy import func, or_
@@ -175,7 +176,13 @@ class SalesRepository:
         if search and search.strip():
             # POS: staff look a customer up by name or phone number.
             pattern = f"%{search.strip()}%"
-            query = query.filter(or_(User.full_name.ilike(pattern), User.phone.ilike(pattern)))
+            conditions = [User.full_name.ilike(pattern), User.phone.ilike(pattern)]
+            digits = re.sub(r"\D", "", search.strip().removeprefix("+91"))
+            if len(digits) >= 4:
+                # "+91 98765-43210" finds 9876543210: compare digits only, +91/0 prefix dropped.
+                digits = digits[-10:] if len(digits) > 10 else digits.removeprefix("0")
+                conditions.append(func.regexp_replace(User.phone, r"\D", "", "g").contains(digits))
+            query = query.filter(or_(*conditions))
         return query
 
     @staticmethod

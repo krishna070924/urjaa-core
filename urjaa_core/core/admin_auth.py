@@ -233,6 +233,14 @@ ADMIN_ROUTE_PERMISSION_RULES: list[dict[str, Any]] = [
         "any_of": {ADMIN_PERMISSION_MANAGE_SALES},
     },
     {
+        # Store Customers list/search and a customer's bills + store credit ledger: read-only.
+        "pattern": re.compile(r"^/admin/sales/customers(?:/[^/]+/account)?$"),
+        "methods": {"GET"},
+        "any_of": {ADMIN_PERMISSION_VIEW_SALES, ADMIN_PERMISSION_MANAGE_SALES},
+    },
+    {
+        # Includes POST .../{id}/store-credit (manual credit / deduction). Narrow
+        # that one to e.g. manage_customers here if only admins should give credit.
         "pattern": re.compile(r"^/admin/sales/customers(?:/.*)?$"),
         "methods": None,
         "any_of": {ADMIN_PERMISSION_MANAGE_SALES},
