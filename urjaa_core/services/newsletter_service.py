@@ -73,5 +73,7 @@ def unsubscribe(db: Session, email: str, token: str, client_ip: str) -> None:
     row = _find(db, email)
     if row is not None and row.unsubscribed_at is None:
         row.unsubscribed_at = datetime.utcnow()
-        row.whatsapp_opt_in = False  # withdrawal covers every channel
+        # Withdrawal covers every channel; the phone was only kept for WhatsApp.
+        row.whatsapp_opt_in = False
+        row.phone = None
         db.commit()

@@ -155,7 +155,7 @@ def test_unsubscribe_token(db: Session) -> None:
 
     newsletter_service.unsubscribe(db, email, token, ip)
     row = _row(db, email)
-    assert row.unsubscribed_at is not None and row.whatsapp_opt_in is False
+    assert row.unsubscribed_at is not None and row.whatsapp_opt_in is False and row.phone is None
 
     # Different secret = old links stop working.
     os.environ[newsletter_service.SECRET_ENV] = "rotated-" + "b" * 40
