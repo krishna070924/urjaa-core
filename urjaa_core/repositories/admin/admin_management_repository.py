@@ -64,7 +64,7 @@ class AdminManagementRepository:
             db.query(Product)
             .options(selectinload(Product.variants))
             .filter(Product.store_id == store_id)
-            .order_by(Product.created_at.desc())
+            .order_by(Product.created_at.desc(), Product.id.desc())
             .limit(limit)
             .all()
         )
@@ -80,7 +80,7 @@ class AdminManagementRepository:
             db.query(ProductVariant, Product)
             .join(Product, Product.id == ProductVariant.product_id)
             .filter(ProductVariant.stock_quantity <= threshold, ProductVariant.store_id == store_id)
-            .order_by(ProductVariant.stock_quantity.asc(), Product.created_at.desc())
+            .order_by(ProductVariant.stock_quantity.asc(), Product.created_at.desc(), Product.id.desc())
             .limit(limit)
             .all()
         )
@@ -724,7 +724,7 @@ class AdminManagementRepository:
             .outerjoin(Category, Category.id == Subcategory.category_id)
             # H-08: default admin list hides soft-deleted products.
             .filter(Product.deleted_at.is_(None))
-            .order_by(Product.created_at.desc())
+            .order_by(Product.created_at.desc(), Product.id.desc())
         )
 
         if store_id is not None:
@@ -774,7 +774,7 @@ class AdminManagementRepository:
             )
         return (
             query
-            .order_by(Product.updated_at.desc().nullslast(), Product.created_at.desc().nullslast())
+            .order_by(Product.updated_at.desc().nullslast(), Product.created_at.desc().nullslast(), Product.id.desc())
             .all()
         )
 
