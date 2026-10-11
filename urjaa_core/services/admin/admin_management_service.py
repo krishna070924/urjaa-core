@@ -4,6 +4,7 @@ import logging
 from typing import Callable
 
 from fastapi import HTTPException
+from pydantic import ValidationError
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy import func, or_, text
 from sqlalchemy.orm import Session
@@ -48,6 +49,7 @@ from urjaa_core.schemas.admin.management import (
     ProductCreateRequest,
     ProductStonesUpdateRequest,
     ProductUpdateRequest,
+    StoneAssignmentItem,
     StoneCreateRequest,
     StoneUpdateRequest,
     SubcategoryCreateRequest,
@@ -331,7 +333,15 @@ class AdminManagementService:
     _STALE_TEMPLATE_COLUMNS = {"base_metal_id", "metal_color_id", "metal_purity_id", "stone_cost"}
 
     @staticmethod
-    def bulk_upload_products_from_csv_rows(db: Session, store_id: UUID, rows: list[dict[str, str]]) -> dict:
+    def bulk_upload_products_from_csv_rows(
+        db: Session,
+        store_id: UUID,
+        rows: list[dict[str, str]],
+        stones_by_product_name: dict[str, list[dict]] | None = None,
+    ) -> dict:
+        """stones_by_product_name: lowercased product_name -> already-validated
+        StoneAssignmentItem dumps (xlsx 'stones' sheet), inserted in the same
+        transaction as the products so the upload stays all-or-nothing."""
         if not rows:
             return {
                 "success": False,
@@ -634,6 +644,10 @@ class AdminManagementService:
                 )
                 created_product = AdminManagementRepository.create_product(db, product)
                 products_by_slug[slug] = created_product
+                stones = (stones_by_product_name or {}).get(meta["product_name"].strip().lower())
+                if stones:
+                    # Same writer the product editor's stones endpoint uses.
+                    AdminManagementRepository.replace_product_stones(db, created_product.id, stones)
 
             created_variant_count = 0
             for item in normalized_rows:
@@ -683,7 +697,7 @@ class AdminManagementService:
         one place. Only the join itself (and the row-number translation back
         to what staff see in Excel) is new here.
         """
-        product_sheet_rows, variant_sheet_rows = parse_bulk_upload_workbook(content)
+        product_sheet_rows, variant_sheet_rows, stone_sheet_rows = parse_bulk_upload_workbook(content)
 
         if not product_sheet_rows and not variant_sheet_rows:
             return {
@@ -745,10 +759,46 @@ class AdminManagementService:
                     "errors": [f"Product {values.get('product_name', '')!r} has no variant rows in the variants sheet"],
                 })
 
+        # Stones sheet (optional): one row per stone line, linked by
+        # product_name. Validated with the product editor's own
+        # StoneAssignmentItem; the stone type is matched by name.
+        stone_by_name = {s.name.strip().lower(): s for s in AdminManagementRepository.get_stones(db)}
+        valid_stone_names = ", ".join(sorted(s.name for s in stone_by_name.values()))
+        stones_by_product_name: dict[str, list[dict]] = {}
+        for row_number, values in stone_sheet_rows:
+            row_errors: list[str] = []
+            name = values.get("product_name", "").strip()
+            if not name:
+                row_errors.append("product_name is required")
+            elif name.lower() not in products_by_name:
+                row_errors.append(f"product_name {name!r} not found in the products sheet")
+            stone_type = values.get("stone_type", "").strip()
+            stone = stone_by_name.get(stone_type.lower())
+            if not stone_type:
+                row_errors.append("stone_type is required")
+            elif stone is None:
+                row_errors.append(f"Stone type {stone_type!r} not found. Valid: {valid_stone_names}")
+            fields = {
+                key: values.get(key) or None
+                for key in ("quantity", "total_carat_weight", "cost", "cut", "clarity", "color", "origin", "certificate_number")
+            }
+            fields["certification_agency"] = values.get("certification_agency", "").upper() or None
+            try:
+                # Placeholder id when the type is unknown -- already reported above.
+                item = StoneAssignmentItem(stone_id=stone.id if stone else 1, **fields)
+            except ValidationError as exc:
+                row_errors.extend(f"{err['loc'][0]}: {err['msg']}" for err in exc.errors())
+            if row_errors:
+                pre_errors.append({"row_number": f"stones row {row_number}", "errors": row_errors})
+                continue
+            stones_by_product_name.setdefault(name.lower(), []).append(item.model_dump())
+
         if pre_errors:
             return {"success": False, "inserted_products": 0, "inserted_variants": 0, "errors": pre_errors}
 
-        result = AdminManagementService.bulk_upload_products_from_csv_rows(db, store_id, rows)
+        result = AdminManagementService.bulk_upload_products_from_csv_rows(
+            db, store_id, rows, stones_by_product_name=stones_by_product_name
+        )
         if result["errors"]:
             # Service row_number is the 1-based position in `rows` (offset by
             # 2 -- see enumerate(rows, start=2) above); translate it back to
