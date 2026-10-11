@@ -707,9 +707,7 @@ class AdminManagementRepository:
         limit: int,
         store_id: UUID | None = None,
         search: str | None = None,
-        category_id: int | None = None,
-        subcategory_id: int | None = None,
-        collection_id: int | None = None,
+        **filters,
     ) -> tuple[list[Product], int]:
         offset = (page - 1) * limit
         query = (
@@ -740,23 +738,44 @@ class AdminManagementRepository:
                 )
             )
 
-        if category_id is not None:
-            query = query.filter(Category.id == category_id)
-
-        if subcategory_id is not None:
-            query = query.filter(Product.subcategory_id == subcategory_id)
-
-        if collection_id is not None:
-            query = query.join(
-                ProductCollection, ProductCollection.product_id == Product.id
-            ).filter(ProductCollection.collection_id == collection_id)
-
+        query = AdminManagementRepository._filter_products(query, **filters)
         total = query.count()
         items = query.offset(offset).limit(limit).all()
         return items, total
 
     @staticmethod
-    def get_all_products_with_relations(db: Session, tag_id: int | None = None) -> list[Product]:
+    def _filter_products(
+        query,
+        category_id: int | None = None,
+        subcategory_id: int | None = None,
+        collection_id: int | None = None,
+        metal_id: int | None = None,
+        stone_id: int | None = None,
+        status: str | None = None,
+        in_stock: bool | None = None,
+    ):
+        """Admin product-list filters, ANDed. `query` must already outer-join
+        Subcategory (both list queries do). metal/stock match if ANY variant
+        does; a product is "out of stock" when no variant has stock > 0."""
+        if category_id is not None:
+            query = query.filter(Subcategory.category_id == category_id)
+        if subcategory_id is not None:
+            query = query.filter(Product.subcategory_id == subcategory_id)
+        if collection_id is not None:
+            query = query.filter(Product.collections.any(Collection.id == collection_id))
+        if metal_id is not None:
+            query = query.filter(Product.variants.any(ProductVariant.metal_id == metal_id))
+        if stone_id is not None:
+            query = query.filter(Product.stones.any(ProductStone.stone_id == stone_id))
+        if status is not None:
+            query = query.filter(Product.status == status)
+        if in_stock is not None:
+            has_stock = Product.variants.any(ProductVariant.stock_quantity > 0)
+            query = query.filter(has_stock if in_stock else ~has_stock)
+        return query
+
+    @staticmethod
+    def get_all_products_with_relations(db: Session, tag_id: int | None = None, **filters) -> list[Product]:
         query = (
             db.query(Product)
             .options(
@@ -765,9 +784,11 @@ class AdminManagementRepository:
                 selectinload(Product.images),
                 selectinload(Product.gender),
             )
+            .outerjoin(Subcategory, Subcategory.id == Product.subcategory_id)
             # H-08: default admin list (cross-store) hides soft-deleted products.
             .filter(Product.deleted_at.is_(None))
         )
+        query = AdminManagementRepository._filter_products(query, **filters)
         if tag_id is not None:
             query = query.join(ProductTag, ProductTag.product_id == Product.id).filter(
                 ProductTag.tag_id == tag_id
