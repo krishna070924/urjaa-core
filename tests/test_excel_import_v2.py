@@ -22,6 +22,13 @@ Covers:
 8. bulk_upload_products_from_xlsx row errors name the sheet + row staff see
    ("variants row 3", "products row 3"), for an orphaned variant row and a
    product with no variant rows.
+9. Stones sheet: two stone rows for one product (type matched by name,
+   case-insensitive) -> product_stones rows on that product with their
+   fields; every other product in the file gets none. Blank status on the
+   products sheet -> product created as draft (inactive).
+10. Unknown stone type / bad certification_agency -> "stones row N" error,
+    nothing inserted (whole upload atomic).
+11. A workbook without the stones sheet (pre-stones template) still imports.
 
 Run: .venv/bin/python tests/test_excel_import_v2.py
 """
@@ -36,7 +43,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from urjaa_core.core.database import engine
-from urjaa_core.models import Product, ProductVariant, Store
+from urjaa_core.models import Product, ProductStone, ProductVariant, Store
 from urjaa_core.services.admin.admin_management_service import AdminManagementService as svc
 from urjaa_core.utils.excel_template import generate_product_template
 
@@ -152,7 +159,7 @@ def main() -> None:
         data = generate_product_template(db)
         assert isinstance(data, bytes) and len(data) > 1000, len(data)
         wb = openpyxl.load_workbook(io.BytesIO(data))
-        assert wb.sheetnames == ["products", "variants", "instructions"], wb.sheetnames
+        assert wb.sheetnames == ["products", "variants", "stones", "instructions"], wb.sheetnames
         all_values = {str(cell.value) for row in wb["instructions"].iter_rows() for cell in row if cell.value is not None}
         assert "22K Yellow Gold" in all_values, "metal combinations missing from instructions sheet"
         assert "Rings" in all_values, "categories missing from instructions sheet"
@@ -198,6 +205,63 @@ def main() -> None:
         assert "not found in the products sheet" in all_msgs, all_msgs
         assert "no variant rows" in all_msgs, all_msgs
         print(f"xlsx row errors name sheet + row       -> OK  {sorted(labels)}")
+
+        # --- 9. Stones sheet attaches stones to the right product; blank status -> draft ---
+        name_s1, name_s2 = f"K01 Stone Ring {suffix}", f"K01 Plain Ring {suffix}"
+        wb3 = openpyxl.load_workbook(io.BytesIO(data))
+        wb3["products"].append([name_s1, "Rings", "", "", "", "", "", ""])  # status blank
+        wb3["products"].append([name_s2, "Rings", "", "", "", "active", "", ""])
+        wb3["variants"].append([name_s1, "", "18K White Gold", "", "", "3", "", "", "1"])
+        wb3["variants"].append([name_s1, "", "22K Yellow Gold", "", "", "3", "", "", "1"])
+        wb3["variants"].append([name_s2, "", "", "", "", "", "", "", "1"])
+        wb3["stones"].append([name_s1, "diamond", 12, 0.36, 18000, "Excellent", "VS1", "F", "", "IGI-1", "igi"])
+        wb3["stones"].append([name_s1.upper(), "Ruby"])  # every stone field optional
+        buf3 = io.BytesIO()
+        wb3.save(buf3)
+
+        result3 = svc.bulk_upload_products_from_xlsx(db, store.id, buf3.getvalue())
+        assert result3["success"] and result3["inserted_products"] == 2 and result3["inserted_variants"] == 3, result3
+        p1 = db.query(Product).filter(Product.name == name_s1).one()
+        p2 = db.query(Product).filter(Product.name == name_s2).one()
+        assert p1.status == "draft", p1.status
+        assert p2.status == "active", p2.status
+        stones1 = sorted(db.query(ProductStone).filter(ProductStone.product_id == p1.id).all(), key=lambda r: r.stone.name)
+        assert [r.stone.name for r in stones1] == ["Diamond", "Ruby"], stones1
+        d = stones1[0]
+        assert (d.quantity, float(d.total_carat_weight), float(d.cost), d.cut, d.clarity, d.color, d.origin,
+                d.certificate_number, d.certification_agency) == (12, 0.36, 18000.0, "Excellent", "VS1", "F", None, "IGI-1", "IGI"), d.__dict__
+        assert stones1[1].quantity is None and stones1[1].cost is None, stones1[1].__dict__
+        assert db.query(ProductStone).filter(ProductStone.product_id == p2.id).count() == 0
+        print("stones sheet + blank status             -> OK  2 stones on the right product, blank status = draft")
+
+        # --- 10. Bad stone rows -> per-row errors, nothing inserted ---
+        name_bad = f"K01 Bad Stone {suffix}"
+        wb4 = openpyxl.load_workbook(io.BytesIO(data))
+        wb4["products"].append([name_bad, "Rings", "", "", "", "", "", ""])
+        wb4["variants"].append([name_bad, "", "", "", "", "", "", "", "1"])
+        wb4["stones"].append([name_bad, "Unobtainium"])
+        wb4["stones"].append([name_bad, "Diamond", "-1", "", "", "", "", "", "", "", "XYZ"])
+        buf4 = io.BytesIO()
+        wb4.save(buf4)
+        result4 = svc.bulk_upload_products_from_xlsx(db, store.id, buf4.getvalue())
+        assert not result4["success"] and result4["inserted_products"] == 0, result4
+        errs4 = {e["row_number"]: " ".join(e["errors"]) for e in result4["errors"]}
+        assert "Unobtainium" in errs4["stones row 3"] and "Diamond" in errs4["stones row 3"], errs4
+        assert "quantity" in errs4["stones row 4"] and "certification_agency" in errs4["stones row 4"], errs4
+        assert db.query(Product).filter(Product.name == name_bad).count() == 0
+        print(f"bad stone rows                          -> OK  {errs4}")
+
+        # --- 11. Pre-stones template (no stones sheet) still imports ---
+        name_old = f"K01 Old Template {suffix}"
+        wb5 = openpyxl.load_workbook(io.BytesIO(data))
+        del wb5["stones"]
+        wb5["products"].append([name_old, "Rings", "", "", "", "", "", ""])
+        wb5["variants"].append([name_old, "", "", "", "", "", "", "", "1"])
+        buf5 = io.BytesIO()
+        wb5.save(buf5)
+        result5 = svc.bulk_upload_products_from_xlsx(db, store.id, buf5.getvalue())
+        assert result5["success"] and result5["inserted_products"] == 1, result5
+        print("workbook without stones sheet          -> OK")
 
         print("ALL OK")
     finally:
