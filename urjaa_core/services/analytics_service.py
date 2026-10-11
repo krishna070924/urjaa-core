@@ -157,16 +157,25 @@ def compute_rfm_scores(store_id: UUID, db: Any) -> dict[UUID, RFMResult]:
     try:
         from sqlalchemy import func
         from urjaa_core.models.order import Order
+        from urjaa_core.models.sale import Sale
 
         now = datetime.now(UTC)
 
+        # Spend is net of store returns, like Insights revenue (NET_SALE_AMOUNT).
+        returned = (
+            db.query(Sale.order_id, func.sum(Sale.returned_amount).label("amount"))
+            .filter(Sale.returned_amount > 0)
+            .group_by(Sale.order_id)
+            .subquery()
+        )
         rows = (
             db.query(
                 Order.user_id,
                 func.max(Order.created_at).label("last_order"),
                 func.count(Order.id).label("order_count"),
-                func.sum(Order.total_amount).label("total_spend"),
+                func.sum(Order.total_amount - func.coalesce(returned.c.amount, 0)).label("total_spend"),
             )
+            .outerjoin(returned, returned.c.order_id == Order.id)
             .filter(Order.user_id.isnot(None), Order.store_id == store_id)
             .group_by(Order.user_id)
             .all()

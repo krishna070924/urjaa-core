@@ -284,6 +284,7 @@ class SalesRepository:
                 selectinload(Sale.product),
                 selectinload(Sale.variant),
                 selectinload(Sale.customer),
+                selectinload(Sale.order),
             )
             .order_by(Sale.date_time.desc(), Sale.created_at.desc())
             .filter(Sale.store_id == store_id)

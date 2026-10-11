@@ -266,6 +266,16 @@ class SalesService:
         if sale_status not in {"PENDING", "PROCESSING", "SHIPPED", "DELIVERED", "CANCELLED", "COMPLETED"}:
             sale_status = "COMPLETED"
 
+        # GST as stored on the bill (orders.tax_amount), shared across its lines by
+        # price. Never recomputed: pre-GST bills, website orders and order-less
+        # sales stored no GST and show 0.
+        order = sale.order
+        gst_amount = (
+            float(money(order.tax_amount * sale.final_price / order.total_amount))
+            if order is not None and order.tax_amount and order.total_amount
+            else 0.0
+        )
+
         if is_website_order:
             short_order_id = str(sale.order_id).split("-")[0]
             product_name = f"Website Order {short_order_id}"
@@ -287,6 +297,7 @@ class SalesService:
             "total_amount": total_amount,
             "final_price": float(sale.final_price),
             "discount_amount": max(0.0, round(total_amount - float(sale.final_price or 0), 2)),
+            "gst_amount": gst_amount,
             "cost_price": total_cost_price,
             "profit": total_profit,
             "source": sale.source,
@@ -958,6 +969,8 @@ class SalesService:
                 "quantity",
                 "order_id",
                 "final_price",
+                "gst_amount",
+                "total_paid",
                 "total_amount",
                 "cost_price",
                 "profit",
@@ -979,6 +992,8 @@ class SalesService:
                     sale.quantity,
                     str(sale_response["order_id"]) if sale_response["order_id"] else "",
                     sale_response["final_price"],
+                    sale_response["gst_amount"],
+                    round(sale_response["final_price"] + sale_response["gst_amount"], 2),
                     sale_response["total_amount"],
                     sale_response["cost_price"],
                     sale_response["profit"],
