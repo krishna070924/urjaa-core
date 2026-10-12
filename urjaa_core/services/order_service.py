@@ -358,7 +358,9 @@ class OrderService:
         query = (
             db.query(Order)
             .options(selectinload(Order.items))
-            .filter(Order.user_id == user_id)
+            # Store (POS) bills carry the customer's user_id too, for analytics;
+            # they have no order_items and stay out of the storefront's My Orders.
+            .filter(Order.user_id == user_id, Order.source == "website")
         )
 
         if status_filter is not None:
@@ -388,7 +390,7 @@ class OrderService:
         order = (
             db.query(Order)
             .options(selectinload(Order.items))
-            .filter(Order.id == order_id, Order.user_id == user_id)
+            .filter(Order.id == order_id, Order.user_id == user_id, Order.source == "website")
             .first()
         )
 

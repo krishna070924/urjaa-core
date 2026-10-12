@@ -1,11 +1,12 @@
 import uuid
 
-from sqlalchemy import Column, Integer, ForeignKey, DECIMAL, TIMESTAMP, String, Text
+from sqlalchemy import Column, Integer, ForeignKey, DECIMAL, TIMESTAMP, String, Text, select
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 
 from urjaa_core.models.base import Base
+from urjaa_core.models.order import Order
 
 
 class Sale(Base):
@@ -53,3 +54,12 @@ NET_SALE_QUANTITY = Sale.quantity - Sale.returned_quantity
 # Profit after returns: the returned value comes off, and the returned pieces'
 # cost comes back (they go back into stock).
 NET_SALE_PROFIT = Sale.profit - Sale.returned_amount + Sale.cost_price * Sale.returned_quantity / Sale.quantity
+
+# A bill's value after store returns (ex-GST, like NET_SALE_AMOUNT): what
+# customer analytics sum per orders.user_id. Website orders have no returns.
+ORDER_NET_AMOUNT = Order.total_amount - (
+    select(func.coalesce(func.sum(Sale.returned_amount), 0))
+    .where(Sale.order_id == Order.id)
+    .correlate(Order)
+    .scalar_subquery()
+)
