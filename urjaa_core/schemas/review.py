@@ -22,6 +22,9 @@ class ProductReviewPublicResponse(BaseModel):
     is_verified_purchase: bool
     created_at: datetime
     reviewer_name: str
+    # UX-12: the one staff reply, shown as "Response from Urjaa Ornaments".
+    reply_content: str | None = None
+    replied_at: datetime | None = None
 
 
 class ProductReviewsResponse(BaseModel):
